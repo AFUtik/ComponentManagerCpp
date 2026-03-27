@@ -1,13 +1,18 @@
 #include <iostream>
-#include "BasicComponent.hpp"
+#include "EntityManager.hpp"
 
 int main(int, char**)
 {
+    // Example //
+    
     ECS manager;
     manager.register_type<BasicComponent>();
-    manager.register_type<BasicComponent2>();
 
-    std::cout << ECS::Component<BasicComponent2>::_id << std::endl; 
+    Entity& entity = manager.create_object();
+    entity.number = 34;
+    entity.add(BasicComponent(26));
+
+    entity.get<BasicComponent>().print();
 
     return 0;
 }

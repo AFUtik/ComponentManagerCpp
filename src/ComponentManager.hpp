@@ -20,7 +20,6 @@ using u64 = std::uint64_t;
 using usize = u64;
 
 constexpr std::size_t MAX_COMPONENTS = 256;
-using Entity = u64;
 using ComponentID = std::size_t;
 
 struct Empty {};
@@ -36,14 +35,18 @@ struct ComponentManager {
 
     struct Object : public ObjBase {
         I id = invalid;
-        bool exists = false;
         
         Object() = default;
-        Object(T *p, I id) : id(id), p(p), exists(true) {}
+        Object(T *p, I id) : id(id), p(p) {}
                     
         template <typename C>
-        inline C& get() const {
-            return this->p->template component<C>(*this);
+        inline C& get() {
+            return this->p->template get_component<C>(*this);
+        }
+
+        template <typename C>
+        inline void add(C&& component) {
+            this->p->template add_component<C>(*this, std::forward<C>(component));   
         }
 
         inline bool is_valid() { return id < invalid;}
@@ -69,13 +72,14 @@ struct ComponentManager {
         }
     };
     
-    struct BaseComponent {
+    struct BaseComponent {    
         BaseComponent() = default;
-        BaseComponent(const BaseComponent &other) = delete;
-        BaseComponent(BaseComponent &other) = delete;
-        BaseComponent &operator=(const BaseComponent &other) = delete;
-        BaseComponent &operator=(BaseComponent &other) = delete;
-        virtual ~BaseComponent() = default;
+
+        BaseComponent(const BaseComponent&) = delete;
+        BaseComponent& operator=(const BaseComponent&) = delete;
+
+        BaseComponent(BaseComponent&&) noexcept = default;
+        BaseComponent& operator=(BaseComponent&&) noexcept = default;
 
         virtual void init() {};
         
@@ -86,7 +90,7 @@ struct ComponentManager {
         inline void destroy() {
             object_id = invalid;
         }
-    private:
+
         I object_id = invalid;
     };
  
@@ -95,7 +99,7 @@ struct ComponentManager {
         inline static u64 _id;
         inline static T *_p;
 
-        inline Object& object() const {
+        inline const Object& object() const {
             return this->parent().object_by_index(this->object_id);
         } 
 
@@ -166,7 +170,7 @@ struct ComponentManager {
         this->components[id].resize(this->size);
     }
 
-    Object object_by_index(u64 i) {
+    const Object& object_by_index(u64 i) const {
         return objects[i];
     }
     
@@ -182,7 +186,7 @@ struct ComponentManager {
     }
 
     template <typename C>
-    inline C& add_component(Object& object, Component<C> &&component) {
+    inline C& add_component(Object& object, C &&component) {
         static_assert(std::is_base_of_v<BaseComponent, C>);
         
         const u64 id = Component<C>::_id;
@@ -192,8 +196,9 @@ struct ComponentManager {
 
         C* ptr = reinterpret_cast<C*>(array[object.id]);
         new (ptr) C(std::move(component));
+
         ptr->object_id = object.id;
-        ptr->block = array.block(object.id);
+        
         return *ptr;
     }
 
@@ -216,7 +221,7 @@ struct ComponentManager {
 
     inline Object& create_object() {
         u64 index = obtain_object_free_index();
-        objects[index] = Object(this, index);
+        objects[index] = Object(static_cast<T*>(this), index);
         return objects[index];
     }
 
@@ -235,14 +240,11 @@ struct ComponentManager {
         free_head = object.id;
     }
 
-    inline Object& get_object(u64 id) {
-        return objects[id];
-    }
-
     inline void resize(usize size) {this->size = size;}
 
     ComponentManager() {
         for(int i = 0; i < MAX_COMPONENTS; i++) objects_free[i] = i+1;
+        this->resize(256);
     }
 private:
     inline u64 obtain_object_free_index() {
