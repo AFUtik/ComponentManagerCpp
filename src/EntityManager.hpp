@@ -1,8 +1,16 @@
 #include "ComponentManager.hpp"
 #include <iostream>
 
+struct BasicEvent {
+    int data;
+};
+
 struct EntityObj {
     u64 number;
+
+    void on_event(const BasicEvent& event) {
+        std::cout << event.data << std::endl;
+    };
 };
 
 struct ECS : ComponentManager<

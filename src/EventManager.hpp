@@ -10,7 +10,6 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
 
-template<u64 MaxEvents>
 class EventManager {
     template <typename Event>
     class EventBus {
@@ -19,16 +18,11 @@ class EventManager {
             void* obj = nullptr;
             void(*call)(void*, const Event&) = nullptr;
         };
+
         Freelist<Listener, u64> listeners;
 
-        template<typename T, void (T::*Method)(const Event&)>
-        inline u64 subscribe(T* obj) {
-            return listeners.push({
-                obj,
-                [](void* o, const Event& e) {
-                    (static_cast<T*>(o)->*Method)(e);
-                }
-            });
+        u64 subscribe(void* obj, void(*call)(void*, const Event&)) {
+            return listeners.push(Listener{obj, call});
         }
 
         inline void unsubscribe(u64 index) {
@@ -44,7 +38,7 @@ class EventManager {
     private:
         EventManager* manager;
     };
-
+public:
     template<typename Event>
     static auto& bus() {
         static EventBus<Event> instance;
@@ -56,8 +50,14 @@ class EventManager {
         bus<Event>().emit(e);
     }
 
-    template<typename Event>
-    static void subscribe(void(*fn)(const Event&)) {
-        bus<Event>().subscribe(fn);
+    template<typename T, typename Event, auto Method>
+    static inline u64 subscribe(T* obj) {
+        return bus<Event>().subscribe(
+            obj,
+            [](void* o, const Event& e) {
+                (static_cast<T*>(o)->*Method)(e);
+            }
+        );
     }
+
 }; 

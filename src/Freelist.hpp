@@ -71,15 +71,14 @@ public:
         next.reserve(256);
     }
 
-    template<typename U>
-    inline I push(U&& object) {
+    inline I push(T&& object) {
         I index = obtain_free_index();
         if (index == _size) {
-            vec.emplace_back(std::forward<U>(object));
+            vec.emplace_back(std::forward<T>(object));
             next.emplace_back(invalid);
             _size++;
         } else {
-            vec[index] = std::forward<U>(object);
+            vec[index] = std::forward<T>(object);
         }
         return index;
     }

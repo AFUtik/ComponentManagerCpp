@@ -1,5 +1,7 @@
 #include <iostream>
+
 #include "EntityManager.hpp"
+#include "EventManager.hpp"
 
 int main(int, char**)
 {
@@ -10,6 +12,14 @@ int main(int, char**)
 
     Entity& entity = manager.create_object();
     Entity& entity2 = manager.create_object();
+
+    
+    EventManager::subscribe<Entity, BasicEvent, &Entity::on_event>(&entity2);
+
+    BasicEvent event;
+    event.data = 25;
+    
+    EventManager::emit(event);
 
     std::cout << entity2.id << std::endl;
 
