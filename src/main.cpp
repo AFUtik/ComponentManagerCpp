@@ -9,10 +9,9 @@ int main(int, char**)
     manager.register_type<BasicComponent>();
 
     Entity& entity = manager.create_object();
-    entity.number = 34;
-    entity.add(BasicComponent(26));
+    Entity& entity2 = manager.create_object();
 
-    entity.get<BasicComponent>().print();
+    std::cout << entity2.id << std::endl;
 
     return 0;
 }

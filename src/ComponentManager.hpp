@@ -14,6 +14,8 @@
 #include <array>
 #include <new>
 
+#include "Freelist.hpp"
+
 using u8  = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
@@ -40,7 +42,7 @@ struct ComponentManager {
         Object(T *p, I id) : id(id), p(p) {}
                     
         template <typename C>
-        inline C& get() {
+        inline C& get() const {
             return this->p->template get_component<C>(*this);
         }
 
@@ -58,7 +60,7 @@ struct ComponentManager {
     private:
         T* p = nullptr;
     };
-    
+
     struct ComponentType {
         u64 id;
         usize size;
@@ -113,16 +115,22 @@ struct ComponentManager {
         static constexpr auto BLOCK_SIZE = 512;
         static constexpr auto NUM_BLOCKS = (MAX_OBJECTS / BLOCK_SIZE) + 1;
 
+        struct AlignedArrayDeleter {
+            void operator()(u8* ptr) const noexcept {
+                ::operator delete[](ptr, std::align_val_t(16));
+            }
+        };
+
         struct Block {
             const ComponentArray *parent = nullptr;
-            std::unique_ptr<u8[]> data = nullptr;
+            std::unique_ptr<u8[], AlignedArrayDeleter> data = nullptr;
 
             Block() = default;
 
             Block(const ComponentArray *parent, usize n) : parent(parent) {
                 const auto data_size = BLOCK_SIZE * this->parent->type->size;
 
-                this->data = std::unique_ptr<u8[]>(new (std::align_val_t(16)) u8[data_size]);
+                this->data = std::unique_ptr<u8[], AlignedArrayDeleter>(new (std::align_val_t(16)) u8[data_size]);
 
                 std::memset(data.get(), 0, data_size);
             }
@@ -169,10 +177,6 @@ struct ComponentManager {
         this->components[id] = ComponentArray(&this->components_types[id]);
         this->components[id].resize(this->size);
     }
-
-    const Object& object_by_index(u64 i) const {
-        return objects[i];
-    }
     
     template <typename C>
     inline bool has_component(Object& object) {
@@ -213,54 +217,47 @@ struct ComponentManager {
     }
 
     template <typename C>
-    inline C& get_component(Object& object) {
+    inline C& get_component(const Object& object) const {
         const u64 id = Component<C>::_id; 
-        ComponentArray& array = components[id];
+        auto& array = components[id];
         return *reinterpret_cast<C*>(array[object.id]);
     }
 
     inline Object& create_object() {
-        u64 index = obtain_object_free_index();
-        objects[index] = Object(static_cast<T*>(this), index);
-        return objects[index];
+        u64 i = objects.push(Object(static_cast<T*>(this), invalid));
+
+        Object& obj = objects[i];
+        obj.id = i;
+        return obj;
+    }
+    
+    const Object& object_by_index(u64 i) const {
+        return objects[i];
     }
 
     inline void remove_object(Object& object) {
-        auto it = object_dependencies.find(object.id);
-        if(it != object_dependencies.end()) {
+        auto it = object_components.find(object.id);
+        if(it != object_components.end()) {
             for(u64 i : it.second) {
                 auto& array = components[i];
                 array[object.id]->destroy();
             }
         }
-        object_dependencies.erase(it);
-        object[object.id].destroy();
-
-        objects_free[object.id] = free_head;
-        free_head = object.id;
+        object_components.erase(it);
+        objects.erase(object.id);
     }
 
     inline void resize(usize size) {this->size = size;}
 
-    ComponentManager() {
-        for(int i = 0; i < MAX_COMPONENTS; i++) objects_free[i] = i+1;
-        this->resize(256);
-    }
+    ComponentManager() {this->resize(256);}
 private:
-    inline u64 obtain_object_free_index() {
-        uint32_t idx = free_head; 
-        free_head = objects_free[idx];
-        return idx;
-    }
-
     std::array<ComponentArray, MAX_COMPONENTS> components;
     std::array<ComponentType,  MAX_COMPONENTS> components_types;
     u64 components_cnt = 0;
 
-    std::array<Object, MAX_OBJECTS> objects;
-    std::array<u64, MAX_OBJECTS>    objects_free;
+    AllocatedFreelist<Object, I, MAX_OBJECTS> objects;
     u64 free_head = 0;
 
-    std::unordered_map<u64, std::vector<u32>> object_dependencies;    
+    std::unordered_map<u64, std::vector<u32>> object_components;    
     u64 size = 0; 
 };
