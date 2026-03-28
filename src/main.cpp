@@ -13,8 +13,8 @@ int main(int, char**)
     Entity& entity = manager.create_object();
     Entity& entity2 = manager.create_object();
 
-    
-    EventManager::subscribe<Entity, BasicEvent, &Entity::on_event>(&entity2);
+    EventId id;
+    EventManager::subscribe<Entity, BasicEvent, &Entity::on_event>(&entity2, id);
 
     BasicEvent event;
     event.data = 25;
