@@ -1,24 +1,24 @@
 #include <iostream>
 
 #include "components/BasicComponent.hpp"
-#include "Freelist.hpp"
+#include "collections/SparseSet.hpp"
 
 using ListenerId = u64;
+
 
 int main(int, char**)
 {
     // Example //
-    ECS& ecs = ECS::instance();
-    ecs.register_type<BasicComponent>();
+    AllocatedSerialSparseSet<u32, u32, 256> sparse_set;
+    sparse_set.push(0);
+    sparse_set.push(3);
+    sparse_set.push(5);
+    sparse_set.push(8);
+    sparse_set.push(12);
 
-    Entity& ent = ecs.create_object(); 
+    sparse_set.erase(2);
 
-    ent.add(BasicComponent(64));
-    ent.remove<BasicComponent>();
-
-    ecs.remove_object(ent);
-
-    std::cout << "Size of ECS: " << (sizeof(ecs) / 1024) << " kb" << std::endl;
+    for(u32 v : sparse_set) {std::cout << v << std::endl;}
 
     return 0;
 }
