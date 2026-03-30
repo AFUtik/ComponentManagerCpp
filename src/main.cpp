@@ -1,7 +1,6 @@
 #include <iostream>
 
-#include "EntityManager.hpp"
-#include "EventManager.hpp"
+#include "components/BasicComponent.hpp"
 #include "Freelist.hpp"
 
 using ListenerId = u64;
@@ -9,21 +8,15 @@ using ListenerId = u64;
 int main(int, char**)
 {
     // Example //
-
     ECS& ecs = ECS::instance();
-    Entity& obj = ecs.create_object();
-
     ecs.register_type<BasicComponent>();
-    ecs.register_type<BasicComponent2>();
 
-    obj.add(BasicComponent(34));
-    obj.add(BasicComponent2(35));
+    Entity& ent = ecs.create_object(); 
 
-    auto view = ECS::View<BasicComponent, BasicComponent2>(&ecs);
-    for(auto [b1, b2] : view) {
-        b1.print();
-        b2.print();
-    }
+    ent.add(BasicComponent(64));
+    ecs.remove_object(ent);
+
+    std::cout << "Size of ECS: " << (sizeof(ecs) / 1024) << " kb" << std::endl;
 
     return 0;
 }

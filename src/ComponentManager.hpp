@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -14,10 +15,14 @@
 #include <array>
 #include <new>
 #include <concepts>
+#include <bit>
+#include <cstdint>
+#include <iostream>
 
 #include "Freelist.hpp"
 
 using u8  = std::uint8_t;
+using u16 = std::uint16_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
@@ -34,6 +39,8 @@ template <
     u64 MAX_COMPONENTS,
     u64 MAX_OBJECTS>
 struct ComponentManager {
+    using BitsetComp = std::bitset< (MAX_COMPONENTS + 63) & ~size_t(63) >;
+
     static constexpr I invalid = std::numeric_limits<I>::max();
 
     struct Object : public ObjBase {
@@ -255,6 +262,7 @@ struct ComponentManager {
         new (ptr) C(std::move(component));
 
         ptr->object_id = object.id;
+        object_components[object.id].set(id);
         
         return *ptr;
     }
@@ -289,15 +297,23 @@ struct ComponentManager {
     }
 
     inline void remove_object(Object& object) {
-        auto it = object_components.find(object.id);
-        if(it != object_components.end()) {
-            for(u64 i : it.second) {
-                auto& array = components[i];
-                array[object.id]->destroy();
+        BitsetComp& bitset = object_components[object.id];
+
+        auto* data = reinterpret_cast<const uint64_t*>(&bitset);
+        constexpr size_t blocks = sizeof(bitset) / 8;
+
+        for (size_t b = 0; b < blocks; ++b) {
+            uint64_t v = data[b];
+            while (v) {
+                int bit = std::countr_zero(v);
+                size_t global = b * 64 + bit;
+
+                std::cout << global << std::endl;
+                components[global][object.id]->destroy();
+
+                v &= v - 1;
             }
         }
-        object_components.erase(it);
-        objects.erase(object.id);
     }
 
     inline void resize(usize size) {this->size = size;}
@@ -314,7 +330,6 @@ private:
     u64 components_cnt = 0;
 
     AllocatedFreelist<Object, I, MAX_OBJECTS> objects;
-    std::unordered_map<u64, std::vector<u32>> object_components;    
-    
+    std::array<BitsetComp, MAX_OBJECTS> object_components;
     u64 size = 0; 
 };

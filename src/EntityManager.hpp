@@ -17,7 +17,7 @@ struct ECS : ComponentManager<
     ECS, 
     u32, 
     EntityObj, 
-    256, 
+    64, 
     256>
 {
     ECS() : ComponentManager() {}
@@ -31,23 +31,3 @@ struct ECS : ComponentManager<
 template <typename C>
 using EntityComponent = ECS::Component<C>;
 using Entity = ECS::Object;
-
-struct BasicComponent : public ECS::Component<BasicComponent> {
-    u64 number = 0;
-
-    BasicComponent(u64 num) : number(num) {}
-
-    void print() {
-        std::cout << number << std::endl;
-    }
-};
-
-struct BasicComponent2 : public ECS::Component<BasicComponent> {
-    u64 number = 0;
-
-    BasicComponent2(u64 num) : number(num) {}
-
-    void print() {
-        std::cout << number << std::endl;
-    }
-};
