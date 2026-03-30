@@ -68,10 +68,6 @@ struct AllocatedSerialSparseSet {
             return dense[index];
         }
 
-        inline const T& operator*() const {
-            return dense[index];
-        }
-
         inline void operator++() {++index;}
 
         inline bool operator!=(const Iterator& other) const {return index != other.index;}
@@ -80,12 +76,33 @@ struct AllocatedSerialSparseSet {
         u64 index = 0;
     };
 
+    struct ConstIterator {
+        ConstIterator(const std::array<T, Capacity>& dense, u64 index) : dense(dense), index(index) {}
+
+        inline const T& operator*() const {return dense[index];}
+
+        inline void operator++() const {++index;}
+
+        inline bool operator!=(ConstIterator& other) const {return index != other.index;}
+    private:
+        const std::array<T, Capacity>& dense;
+        mutable u64 index = 0;
+    };
+
     Iterator begin() {
         return Iterator(dense, 0);
     }
 
     Iterator end() {
         return Iterator(dense, _size);
+    }
+    
+    ConstIterator begin() const {
+        return ConstIterator(dense, 0);
+    }
+
+    ConstIterator end() const {
+        return ConstIterator(dense, _size);
     }
 private:
     std::array<T, Capacity> dense;
@@ -167,13 +184,13 @@ struct AllocatedSparseSet {
         u64 index = 0;
     };
 
-    Iterator begin() {
-        return Iterator(dense, 0);
-    }
+    Iterator begin() {return Iterator(dense, 0);}
 
-    Iterator end() {
-        return Iterator(dense, _size);
-    }
+    Iterator end() {return Iterator(dense, _size);}
+
+    const Iterator begin() const {return Iterator(dense, 0);}
+
+    const Iterator end() const {return Iterator(dense, _size);}
 private:
     std::array<T, Capacity> dense;
     std::array<I, Capacity> dense_ids;

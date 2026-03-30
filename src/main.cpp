@@ -11,11 +11,11 @@ int main(int, char**)
     ecs.register_type<BasicComponent>();
 
     Entity& ent = ecs.create_object(); 
+    ent.number = 25;
     ent.add(BasicComponent(64));
     
-    auto view = ECS::View<BasicComponent>(ecs);
-    for(auto [bs1] : view) {
-        bs1.print();
+    for(const auto& obj : ecs.get_objects()) {
+        std::cout << obj.number << std::endl;
     }
 
     return 0;

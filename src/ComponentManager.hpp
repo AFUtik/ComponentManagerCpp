@@ -298,6 +298,10 @@ struct ComponentManager {
         const u64 id = Component<C>::_id; 
         auto& array = components[id];
         return *reinterpret_cast<C*>(array[object.id]);
+    } 
+    
+    inline const SparseSetObj& get_objects() const {
+        return objects;   
     }
 
     inline Object& create_object() {
