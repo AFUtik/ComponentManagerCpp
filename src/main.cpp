@@ -2,26 +2,28 @@
 
 #include "EntityManager.hpp"
 #include "EventManager.hpp"
+#include "Freelist.hpp"
+
+using ListenerId = u64;
 
 int main(int, char**)
 {
     // Example //
-    
-    ECS manager;
-    manager.register_type<BasicComponent>();
 
-    Entity& entity = manager.create_object();
-    Entity& entity2 = manager.create_object();
+    ECS& ecs = ECS::instance();
+    Entity& obj = ecs.create_object();
 
-    EventId id;
-    EventManager::subscribe<Entity, BasicEvent, &Entity::on_event>(&entity2, id);
+    ecs.register_type<BasicComponent>();
+    ecs.register_type<BasicComponent2>();
 
-    BasicEvent event;
-    event.data = 25;
-    
-    EventManager::emit(event);
+    obj.add(BasicComponent(34));
+    obj.add(BasicComponent2(35));
 
-    std::cout << entity2.id << std::endl;
+    auto view = ECS::View<BasicComponent, BasicComponent2>(&ecs);
+    for(auto [b1, b2] : view) {
+        b1.print();
+        b2.print();
+    }
 
     return 0;
 }

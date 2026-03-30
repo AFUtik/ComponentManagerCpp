@@ -10,8 +10,6 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
 
-using EventId = u64;
-
 class EventManager {
     template <typename Event>
     class EventBus {
@@ -36,30 +34,33 @@ class EventManager {
                 auto& listener = listeners[i];
                 if(listener.call!=nullptr) listener.call(listener.obj, e);
             }
-        } 
-    private:
-        EventManager* manager;
+        }
     };
 public:
     template<typename Event>
-    static auto& bus() {
+    static inline auto& bus() {
         static EventBus<Event> instance;
         return instance;
     }
 
     template<typename Event>
-    static void emit(const Event& e) {
+    static inline void emit(const Event& e) {
         bus<Event>().emit(e);
     }
 
     template<typename T, typename Event, auto Method, typename I>
-    static inline void subscribe(T* obj, I& id) {
-        id = static_cast<I>(bus<Event>().subscribe(
+    static inline void subscribe(T* obj, I& listener_id) {
+        listener_id = static_cast<I>(bus<Event>().subscribe(
             obj,
             [](void* o, const Event& e) {
                 (static_cast<T*>(o)->*Method)(e);
             }
         ));
+    }
+
+    template<typename Event>
+    static inline void unsubscribe(u64 listener_id) {
+        bus<Event>().unsubscribe(listener_id);
     }
 
 }; 

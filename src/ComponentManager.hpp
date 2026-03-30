@@ -13,6 +13,7 @@
 #include <utility>
 #include <array>
 #include <new>
+#include <concepts>
 
 #include "Freelist.hpp"
 
@@ -102,7 +103,7 @@ struct ComponentManager {
         inline static T *_p;
 
         inline const Object& object() const {
-            return this->parent().object_by_index(this->object_id);
+            return this->parent().object_at(this->object_id);
         } 
 
         inline T& parent() const {
@@ -110,7 +111,6 @@ struct ComponentManager {
         }
     };
 
-    // Components //
     struct ComponentArray {
         static constexpr auto BLOCK_SIZE = 512;
         static constexpr auto NUM_BLOCKS = (MAX_OBJECTS / BLOCK_SIZE) + 1;
@@ -140,7 +140,7 @@ struct ComponentManager {
                 return reinterpret_cast<BaseComponent*>(reinterpret_cast<u8*>(this->data.get()) + (this->parent->type->size * i));
             }
         };
-
+        
         ComponentType* type = nullptr;
 
         Block blocks[NUM_BLOCKS];
@@ -157,6 +157,10 @@ struct ComponentManager {
             }
         }
 
+        inline usize size() const {
+            return blocks_cnt*BLOCK_SIZE;
+        }
+
         inline u8 block(usize i) {
             return i / BLOCK_SIZE;
         }
@@ -164,6 +168,55 @@ struct ComponentManager {
         inline BaseComponent* operator[](usize i) const {
             return this->blocks[i / BLOCK_SIZE][i % BLOCK_SIZE];
         }
+    };
+
+    template<typename... Components>
+    requires (std::derived_from<Components, BaseComponent> && ...)
+    struct View {
+        View(T *_p) : _p(_p) {}
+
+        struct Iterator {
+            Iterator(T* _p, size_t i) : _p(_p), index(i) {skip_invalid();}
+            
+            inline auto operator*() {
+                const Object& e = _p->object_at(index);
+                return std::tuple<Components&...>(
+                    _p->template get_component<Components>(e)...
+                );
+            }
+
+            inline void operator++() {
+                ++index;
+                skip_invalid();
+            }
+
+            inline bool operator!=(const Iterator& other) const {
+                return index != other.index;
+            }
+        private:
+            T *_p = nullptr;
+            u64 index = 0;
+
+            inline void skip_invalid() {
+                while (index < _p->objects.size()) {
+                    const Object& e = _p->object_at(index);
+                    if ((_p->template has_component<Components>(e) && ...)) {
+                        break;
+                    }
+                    ++index;
+                }
+            }
+        };
+
+        Iterator begin() {
+            return Iterator(_p,  0);
+        }
+
+        Iterator end() {
+            return Iterator(_p, _p->objects.size());
+        }
+    private:
+        T *_p = nullptr; 
     };
 
     template <typename V>
@@ -179,14 +232,14 @@ struct ComponentManager {
     }
     
     template <typename C>
-    inline bool has_component(Object& object) {
+    inline bool has_component(const Object& object) {
         static_assert(std::is_base_of_v<BaseComponent, C>);
 
         const u64 id = Component<C>::_id;
         auto& array = components[id];
 
         if(array.blocks_cnt * ComponentArray::BLOCK_SIZE < object.id) return false;
-        return array[object.id].is_valid();
+        return array[object.id]->is_valid();
     }
 
     template <typename C>
@@ -231,7 +284,7 @@ struct ComponentManager {
         return obj;
     }
     
-    const Object& object_by_index(u64 i) const {
+    const Object& object_at(u64 i) const {
         return objects[i];
     }
 
@@ -251,13 +304,17 @@ struct ComponentManager {
 
     ComponentManager() {this->resize(256);}
 private:
+    template <typename C> ComponentArray& get_array() {
+        const u64 id = Component<C>::_id;
+        return components[id];
+    }
+
     std::array<ComponentArray, MAX_COMPONENTS> components;
     std::array<ComponentType,  MAX_COMPONENTS> components_types;
     u64 components_cnt = 0;
 
     AllocatedFreelist<Object, I, MAX_OBJECTS> objects;
-    u64 free_head = 0;
-
     std::unordered_map<u64, std::vector<u32>> object_components;    
+    
     u64 size = 0; 
 };
