@@ -1,24 +1,22 @@
 #include <iostream>
 
 #include "components/BasicComponent.hpp"
-#include "collections/SparseSet.hpp"
 
 using ListenerId = u64;
-
 
 int main(int, char**)
 {
     // Example //
-    AllocatedSerialSparseSet<u32, u32, 256> sparse_set;
-    sparse_set.push(0);
-    sparse_set.push(3);
-    sparse_set.push(5);
-    sparse_set.push(8);
-    sparse_set.push(12);
+    ECS& ecs = ECS::instance();
+    ecs.register_type<BasicComponent>();
 
-    sparse_set.erase(2);
-
-    for(u32 v : sparse_set) {std::cout << v << std::endl;}
+    Entity& ent = ecs.create_object(); 
+    ent.add(BasicComponent(64));
+    
+    auto view = ECS::View<BasicComponent>(ecs);
+    for(auto [bs1] : view) {
+        bs1.print();
+    }
 
     return 0;
 }

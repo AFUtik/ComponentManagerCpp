@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include "collections/Freelist.hpp"
+#include "collections/SparseSet.hpp"
 
 using u8  = std::uint8_t;
 using u16 = std::uint16_t;
@@ -73,6 +73,8 @@ struct ComponentManager {
     private:
         T* p = nullptr;
     };
+    
+    using SparseSetObj =  AllocatedSerialSparseSet<Object, I, MAX_OBJECTS>;
 
     struct ComponentType {
         u64 id;
@@ -182,54 +184,61 @@ struct ComponentManager {
         }
     };
 
-    template<typename... Components>
-    requires (std::derived_from<Components, BaseComponent> && ...)
-    struct View {
-        View(T *_p) : _p(_p) {}
+        template<typename... Components>
+        requires (std::derived_from<Components, BaseComponent> && ...)
+        struct View {
+            View(T &_p) : _p(_p) {}
 
-        struct Iterator {
-            Iterator(T* _p, size_t i) : _p(_p), index(i) {skip_invalid();}
-            
-            inline auto operator*() {
-                const Object& e = _p->object_at(index);
-                return std::tuple<Components&...>(
-                    _p->template get_component<Components>(e)...
-                );
+            struct Iterator {
+                Iterator(T& _p, SparseSetObj::Iterator&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
+                    skip_invalid();
+                }
+                
+                inline auto operator*() {
+                    const Object& e = *obj_iter;
+                    return std::tuple<Components&...>(
+                        _p.template get_component<Components>(e)...
+                    );
+                }
+
+                inline void operator++() {
+                    ++obj_iter;
+                    skip_invalid();
+                }
+
+                inline bool operator!=(const Iterator& other) const {
+                    return obj_iter != other.obj_iter;
+                }
+
+                inline bool operator==(const Iterator& other) const {
+                    return obj_iter == other.obj_iter;
+                }
+            private:
+                SparseSetObj::Iterator obj_iter;
+                T &_p;
+
+                inline void skip_invalid() {
+                    while (obj_iter != _p.objects.end()) 
+                    {
+                        const Object& e = *obj_iter;
+                        if ((_p.template has_component<Components>(e) && ...)) {
+                            break;
+                        }
+                        ++obj_iter;
+                    }
+                }
+            };
+
+            Iterator begin() {
+                return Iterator(_p, _p.objects.begin());
             }
 
-            inline void operator++() {
-                ++index;
-                skip_invalid();
-            }
-
-            inline bool operator!=(const Iterator& other) const {
-                return index != other.index;
+            Iterator end() {
+                return Iterator(_p, _p.objects.end());
             }
         private:
-            T *_p = nullptr;
-            u64 index = 0;
-
-            inline void skip_invalid() {
-                while (index < _p->objects.size()) {
-                    const Object& e = _p->object_at(index);
-                    if ((_p->template has_component<Components>(e) && ...)) {
-                        break;
-                    }
-                    ++index;
-                }
-            }
+            T &_p;
         };
-
-        Iterator begin() {
-            return Iterator(_p,  0);
-        }
-
-        Iterator end() {
-            return Iterator(_p, _p->objects.size());
-        }
-    private:
-        T *_p = nullptr; 
-    };
 
     template <typename V>
     void register_type() {
@@ -251,7 +260,7 @@ struct ComponentManager {
         auto& array = components[id];
 
         if(array.blocks_cnt * ComponentArray::BLOCK_SIZE < object.id) return false;
-        return array[object.id]->object_id = object.id;
+        return object_components[object.id][id];
     }
 
     template <typename C>
@@ -338,7 +347,7 @@ private:
     std::array<ComponentType,  MAX_COMPONENTS> components_types;
     u64 components_cnt = 0;
 
-    AllocatedFreelist<Object, I, MAX_OBJECTS> objects;
+    SparseSetObj objects;
     std::vector<BitsetComp> object_components;
     u64 size = 0; 
 };
