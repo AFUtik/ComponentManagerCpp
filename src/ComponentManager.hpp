@@ -184,63 +184,64 @@ struct ComponentManager {
         }
     };
 
-        template<typename... Components>
-        requires (std::derived_from<Components, BaseComponent> && ...)
-        struct View {
-            View(T &_p) : _p(_p) {}
+    template<typename... Components>
+    requires (std::derived_from<Components, BaseComponent> && ...)
+    struct View {
+        View(T &_p) : _p(_p) {}
 
-            struct Iterator {
-                Iterator(T& _p, SparseSetObj::Iterator&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
-                    skip_invalid();
-                }
-                
-                inline auto operator*() {
-                    const Object& e = *obj_iter;
-                    return std::tuple<Components&...>(
-                        _p.template get_component<Components>(e)...
-                    );
-                }
-
-                inline void operator++() {
-                    ++obj_iter;
-                    skip_invalid();
-                }
-
-                inline bool operator!=(const Iterator& other) const {
-                    return obj_iter != other.obj_iter;
-                }
-
-                inline bool operator==(const Iterator& other) const {
-                    return obj_iter == other.obj_iter;
-                }
-            private:
-                SparseSetObj::Iterator obj_iter;
-                T &_p;
-
-                inline void skip_invalid() {
-                    while (obj_iter != _p.objects.end()) 
-                    {
-                        const Object& e = *obj_iter;
-                        if ((_p.template has_component<Components>(e) && ...)) {
-                            break;
-                        }
-                        ++obj_iter;
-                    }
-                }
-            };
-
-            Iterator begin() {
-                return Iterator(_p, _p.objects.begin());
+        struct Iterator {
+            Iterator(T& _p, SparseSetObj::Iterator&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
+                skip_invalid();
+            }
+            
+            inline auto operator*() {
+                const Object& e = *obj_iter;
+                return std::tuple<Components&...>(
+                    _p.template get_component<Components>(e)...
+                );
             }
 
-            Iterator end() {
-                return Iterator(_p, _p.objects.end());
+            inline void operator++() {
+                ++obj_iter;
+                skip_invalid();
+            }
+
+            inline bool operator!=(const Iterator& other) const {
+                return obj_iter != other.obj_iter;
+            }
+
+            inline bool operator==(const Iterator& other) const {
+                return obj_iter == other.obj_iter;
             }
         private:
+            SparseSetObj::Iterator obj_iter;
             T &_p;
+
+            inline void skip_invalid() {
+                while (obj_iter != _p.objects.end()) 
+                {
+                    const Object& e = *obj_iter;
+                    if ((_p.template has_component<Components>(e) && ...)) {
+                        break;
+                    }
+                    ++obj_iter;
+                }
+            }
         };
 
+        Iterator begin() {
+            return Iterator(_p, _p.objects.begin());
+        }
+
+        Iterator end() {
+            return Iterator(_p, _p.objects.end());
+        }
+    private:
+        T &_p;
+    };
+
     template <typename V>
+    requires (std::derived_from<V, BaseComponent>)
     void register_type() {
         const u64 id = this->components_cnt++;
         assert(this->components_cnt <= MAX_COMPONENTS);
@@ -260,7 +261,7 @@ struct ComponentManager {
         auto& array = components[id];
 
         if(array.blocks_cnt * ComponentArray::BLOCK_SIZE < object.id) return false;
-        return object_components[object.id][id];
+        return components_mask[object.id][id];
     }
 
     template <typename C>
@@ -276,7 +277,7 @@ struct ComponentManager {
         new (ptr) C(std::move(component));
 
         ptr->object_id = object.id;
-        object_components[object.id].set(id);
+        components_mask[object.id].set(id);
         
         return *ptr;
     }
@@ -289,7 +290,7 @@ struct ComponentManager {
         auto& array = components[id];
         
         array[object.id]->destroy();
-        object_components[object.id].reset(id);
+        components_mask[object.id].reset(id);
     }
 
     template <typename C>
@@ -301,7 +302,7 @@ struct ComponentManager {
 
     inline Object& create_object() {
         u64 i = objects.push(Object(static_cast<T*>(this), invalid));
-        object_components.resize(objects.size());
+        components_mask.resize(objects.size());
 
         Object& obj = objects[i];
         obj.id = i;
@@ -311,7 +312,7 @@ struct ComponentManager {
     const Object& object_at(u64 i) const {return objects[i];}
 
     inline void remove_object(Object& object) {
-        BitsetComp& bitset = object_components[object.id];
+        BitsetComp& bitset = components_mask[object.id];
 
         auto* data = reinterpret_cast<const uint64_t*>(&bitset);
         constexpr size_t blocks = sizeof(bitset) / 8;
@@ -335,7 +336,7 @@ struct ComponentManager {
 
     ComponentManager() {
         this->resize(256);
-        object_components.reserve(size);
+        components_mask.reserve(size);
     }
 private:
     template <typename C> ComponentArray& get_array() {
@@ -348,6 +349,6 @@ private:
     u64 components_cnt = 0;
 
     SparseSetObj objects;
-    std::vector<BitsetComp> object_components;
+    std::vector<BitsetComp> components_mask;
     u64 size = 0; 
 };
