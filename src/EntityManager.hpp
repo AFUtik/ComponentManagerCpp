@@ -17,8 +17,8 @@ struct ECS : ComponentManager<
     ECS, 
     u32, 
     EntityObj, 
-    64, 
-    256>
+    256, 
+    2048>
 {
     ECS() : ComponentManager() {}
 

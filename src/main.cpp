@@ -14,6 +14,8 @@ int main(int, char**)
     Entity& ent = ecs.create_object(); 
 
     ent.add(BasicComponent(64));
+    ent.remove<BasicComponent>();
+
     ecs.remove_object(ent);
 
     std::cout << "Size of ECS: " << (sizeof(ecs) / 1024) << " kb" << std::endl;

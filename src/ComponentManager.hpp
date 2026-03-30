@@ -59,6 +59,11 @@ struct ComponentManager {
             this->p->template add_component<C>(*this, std::forward<C>(component));   
         }
 
+        template <typename C>
+        inline void remove() {
+            this->p->template remove_component<C>(*this);   
+        }
+
         inline bool is_valid() { return id < invalid;}
 
         inline void destroy() {
@@ -246,7 +251,7 @@ struct ComponentManager {
         auto& array = components[id];
 
         if(array.blocks_cnt * ComponentArray::BLOCK_SIZE < object.id) return false;
-        return array[object.id]->is_valid();
+        return array[object.id]->object_id = object.id;
     }
 
     template <typename C>
@@ -274,7 +279,8 @@ struct ComponentManager {
         const u64 id = Component<C>::_id;
         auto& array = components[id];
         
-        array[object.id]->destroy(); 
+        array[object.id]->destroy();
+        object_components[object.id].reset(id);
     }
 
     template <typename C>
@@ -286,15 +292,14 @@ struct ComponentManager {
 
     inline Object& create_object() {
         u64 i = objects.push(Object(static_cast<T*>(this), invalid));
+        object_components.resize(objects.size());
 
         Object& obj = objects[i];
         obj.id = i;
         return obj;
     }
     
-    const Object& object_at(u64 i) const {
-        return objects[i];
-    }
+    const Object& object_at(u64 i) const {return objects[i];}
 
     inline void remove_object(Object& object) {
         BitsetComp& bitset = object_components[object.id];
@@ -308,17 +313,21 @@ struct ComponentManager {
                 int bit = std::countr_zero(v);
                 size_t global = b * 64 + bit;
 
-                std::cout << global << std::endl;
                 components[global][object.id]->destroy();
 
                 v &= v - 1;
             }
         }
+        bitset.reset();
+        object.destroy();
     }
 
     inline void resize(usize size) {this->size = size;}
 
-    ComponentManager() {this->resize(256);}
+    ComponentManager() {
+        this->resize(256);
+        object_components.reserve(size);
+    }
 private:
     template <typename C> ComponentArray& get_array() {
         const u64 id = Component<C>::_id;
@@ -330,6 +339,6 @@ private:
     u64 components_cnt = 0;
 
     AllocatedFreelist<Object, I, MAX_OBJECTS> objects;
-    std::array<BitsetComp, MAX_OBJECTS> object_components;
+    std::vector<BitsetComp> object_components;
     u64 size = 0; 
 };
