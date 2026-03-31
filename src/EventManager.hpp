@@ -1,7 +1,10 @@
 #pragma once
 
 #include <array>
+#include <bitset>
+#include <bit>
 
+#include "collections/SparseSet.hpp"
 #include "collections/Freelist.hpp"
 
 using u8  = std::uint8_t;
@@ -10,7 +13,10 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
 
-class EventManager {
+//template<typename T, typename I, u64 MAX_EVENTS>
+struct EventManager {
+    //using BitsetEvents = std::bitset< (MAX_EVENTS + 63) & ~size_t(63) >;
+
     template <typename Event>
     class EventBus {
     public:
@@ -19,7 +25,7 @@ class EventManager {
             void(*call)(void*, const Event&) = nullptr;
         };
 
-        Freelist<Listener, u64> listeners;
+        SerialSparseSet<Listener, u64> listeners;
 
         u64 subscribe(void* obj, void(*call)(void*, const Event&)) {
             return listeners.push(Listener{obj, call});
@@ -30,13 +36,10 @@ class EventManager {
         }
 
         void emit(const Event& e) {
-            for (size_t i = 0; i < listeners.size(); ++i) {
-                auto& listener = listeners[i];
-                if(listener.call!=nullptr) listener.call(listener.obj, e);
-            }
+            for (auto& listener : listeners) listener.call(listener.obj, e);
         }
     };
-public:
+
     template<typename Event>
     static inline auto& bus() {
         static EventBus<Event> instance;
@@ -62,5 +65,6 @@ public:
     static inline void unsubscribe(u64 listener_id) {
         bus<Event>().unsubscribe(listener_id);
     }
+private:
 
 }; 
