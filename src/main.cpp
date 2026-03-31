@@ -20,11 +20,11 @@ int main(int, char**)
     //EventManager::unsubscribe<BasicEvent>(id);
     //EventManager::emit(BasicEvent(34));
 
-    EventManager::Subscription<Entity, u16, BasicEvent> sub;
     
+    EventManager::Subscription<Entity, u16, BasicEvent> sub;
     sub.add<BasicEvent, &Entity::on_event>(&ent);
-    sub.remove<BasicEvent>();
-
+    
+    
     EventManager::emit(BasicEvent(101));
     
     return 0;

@@ -79,7 +79,9 @@ struct EventManager {
             data[index<Event>()] = invalid;
         }
 
-        
+        ~Subscription() {
+            (EventManager::unsubscribe<Events>(data[index<Events>()]), ...);
+        }
     private:
         std::array<I, sizeof...(Events)> data{invalid};
     };
