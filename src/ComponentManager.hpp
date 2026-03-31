@@ -99,6 +99,8 @@ struct ComponentManager {
         BaseComponent& operator=(BaseComponent&&) noexcept = default;
 
         virtual void init() {};
+
+        virtual void on_destroy() {};
         
         inline bool is_valid() {
             return this->object_id < invalid;
@@ -190,7 +192,9 @@ struct ComponentManager {
         View(T &_p) : _p(_p) {}
 
         struct Iterator {
-            Iterator(T& _p, SparseSetObj::Iterator&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
+            using arr_iter = std::array<Object, MAX_OBJECTS>::iterator;
+
+            Iterator(T& _p, arr_iter&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
                 skip_invalid();
             }
             
@@ -214,7 +218,7 @@ struct ComponentManager {
                 return obj_iter == other.obj_iter;
             }
         private:
-            SparseSetObj::Iterator obj_iter;
+            arr_iter obj_iter;
             T &_p;
 
             inline void skip_invalid() {

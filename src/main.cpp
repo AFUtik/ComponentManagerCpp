@@ -22,6 +22,11 @@ int main(int, char**)
     //EventManager::emit(BasicEvent(34));
 
     EventManager::emit(BasicEvent(101));
+
+    auto view = ECS::View<BasicComponent>(ecs);
+    for(auto [bs] : view) {
+        std::cout << "okay" << std::endl;
+    }
     
     return 0;
 }

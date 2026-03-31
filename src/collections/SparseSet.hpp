@@ -18,21 +18,12 @@ template<
     u64 Capacity
 >
 struct AllocatedSerialSparseSet {
-    u64 push(T& data) {
+    template<typename U>
+    u64 push(U&& data) {
         assert(_size < Capacity);
 
         sparse[_size] = static_cast<I>(_size);
-        dense[_size]  = std::move(data);
-        _size++;
-
-        return _size-1;
-    }
-
-    u64 push(T&& data) {
-        assert(_size < Capacity);
-
-        sparse[_size] = static_cast<I>(_size);
-        dense[_size]  = std::forward<T>(data);
+        dense[_size]  = std::forward<U>(data);
         _size++;
 
         return _size-1;
@@ -68,48 +59,20 @@ struct AllocatedSerialSparseSet {
         return dense[sparse[id]];
     }
 
-    struct Iterator {
-        Iterator(std::array<T, Capacity>& dense, u64 index) : dense(dense), index(index) {}
-
-        inline T& operator*() {
-            return dense[index];
-        }
-
-        inline void operator++() {++index;}
-
-        inline bool operator!=(const Iterator& other) const {return index != other.index;}
-    private:
-        std::array<T, Capacity>& dense;
-        u64 index = 0;
-    };
-
-    struct ConstIterator {
-        ConstIterator(const std::array<T, Capacity>& dense, u64 index) : dense(dense), index(index) {}
-
-        inline const T& operator*() const {return dense[index];}
-
-        inline void operator++() const {++index;}
-
-        inline bool operator!=(ConstIterator& other) const {return index != other.index;}
-    private:
-        const std::array<T, Capacity>& dense;
-        mutable u64 index = 0;
-    };
-
-    Iterator begin() {
-        return Iterator(dense, 0);
+    auto begin() {
+        return dense.begin();
     }
 
-    Iterator end() {
-        return Iterator(dense, _size ? _size-1 : 0);
+    auto end() {
+        return dense.begin() + _size;
     }
     
-    ConstIterator begin() const {
-        return ConstIterator(dense, 0);
+    auto begin() const {
+        return dense.cbegin();
     }
 
-    ConstIterator end() const {
-        return ConstIterator(dense, _size ? _size-1 : 0);
+    auto end() const {
+        return dense.cbegin() + _size;
     }
 private:
     std::array<T, Capacity> dense;
@@ -123,20 +86,12 @@ template<
     u64 Capacity
 >
 struct AllocatedSparseSet {
-    void push(u64 id, T& data) {
-        assert(_size < Capacity);
-
-        sparse[id] = static_cast<I>(_size);
-        dense[_size]  = std::move(data);
-        dense_ids[_size] = static_cast<I>(id);
-        _size++;
-    }
-
-    void push(u64 id, T&& data) {
+    template <typename U>
+    void push(u64 id, U&& data) {
         assert(_size < Capacity);
 
         sparse[_size] = _size;
-        dense[_size]  = std::forward<T>(data);
+        dense[_size]  = std::forward<U>(data);
         dense_ids[_size] = static_cast<I>(id);
         _size++;
     }
@@ -172,32 +127,21 @@ struct AllocatedSparseSet {
         return dense[sparse[id]];
     }
 
-    struct Iterator {
-        Iterator(std::array<T, Capacity>& dense, u64 index) : dense(dense), index(index) {}
+    auto begin() {
+        return dense.begin();
+    }
 
-        inline T& operator*() {
-            return dense[index];
-        }
+    auto end() {
+        return dense.begin() + _size;
+    }
+    
+    auto begin() const {
+        return dense.cbegin();
+    }
 
-        inline const T& operator*() const {
-            return dense[index];
-        }
-
-        inline void operator++() {++index;}
-
-        inline bool operator!=(const Iterator& other) const {return index != other.index;}
-    private:
-        std::array<T, Capacity>& dense;
-        u64 index = 0;
-    };
-
-    Iterator begin() {return Iterator(dense, 0);}
-
-    Iterator end() {return Iterator(dense, _size);}
-
-    const Iterator begin() const {return Iterator(dense, 0);}
-
-    const Iterator end() const {return Iterator(dense, _size);}
+    auto end() const {
+        return dense.cbegin() + _size;
+    }
 private:
     std::array<T, Capacity> dense;
     std::array<I, Capacity> dense_ids;
@@ -336,19 +280,6 @@ template<
 struct FlatDenseMap {
     static constexpr u64 MAX = std::numeric_limits<I>::max();
 
-    inline void push(I key, T& data) {
-        if(_size >= _capacity) {
-            assert(_capacity != MAX);
-            allocate();
-        }
-
-        dense[static_cast<u64>(_size)]  = std::move(data);
-        dense_ids[static_cast<u64>(_size)] = key;
-        insert_flatmap(key, _size);
-
-        _size++;
-    }
-
     template <typename U>
     inline void push(I key, U&& data) {
         if(_size >= _capacity) {
@@ -356,7 +287,7 @@ struct FlatDenseMap {
             allocate();
         }
 
-        dense[static_cast<u64>(_size)]  = std::forward<T>(data);
+        dense[static_cast<u64>(_size)]  = std::forward<U>(data);
         dense_ids[static_cast<u64>(_size)] = key;
         insert_flatmap(key, _size);
 
