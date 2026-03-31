@@ -5,8 +5,15 @@ struct BasicEvent {
     int data;
 };
 
-struct EntityObj {
+struct EntityObj : public IObject {
     u64 number;
+
+    EntityObj() = default;
+    EntityObj(u64 number) : number(number) {}
+    
+    void init() override {
+        std::cout << "Entity Init" << std::endl;   
+    }
 
     void on_event(const BasicEvent& event) {
         std::cout << event.data << std::endl;

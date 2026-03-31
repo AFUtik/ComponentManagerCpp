@@ -32,6 +32,8 @@ using ComponentID = std::size_t;
 
 struct Empty {};
 
+struct IObject {virtual void init() = 0;};
+
 template <
     typename T,
     typename I,
@@ -48,6 +50,9 @@ struct ComponentManager {
         
         Object() = default;
         Object(T *p, I id) : id(id), p(p) {}
+        
+        template <typename... Args>
+        Object(T *p, I id, Args&&... args) : ObjBase(std::forward<Args>(args)...), id(id), p(p) {}
                     
         template <typename C>
         inline C& get() const {
@@ -310,11 +315,14 @@ struct ComponentManager {
         return objects;   
     }
 
-    inline Object& create_object() {
-        u64 i = objects.push(Object(static_cast<T*>(this), invalid));
+    template <typename... Args>
+    inline Object& create_object(Args&&... args) {
+        u64 i = objects.push(Object(static_cast<T*>(this), invalid, std::forward<Args>(args)...));
         components_mask.resize(objects.size());
 
         Object& obj = objects[i];
+        if constexpr (std::is_base_of_v<IObject, ObjBase>) obj.init();
+        
         obj.id = i;
         return obj;
     }

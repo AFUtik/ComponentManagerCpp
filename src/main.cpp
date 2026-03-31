@@ -12,21 +12,12 @@ int main(int, char**)
     ECS& ecs = ECS::instance();
     ecs.register_type<BasicComponent>();
 
-    Entity& ent = ecs.create_object(); 
+    Entity& ent = ecs.create_object(25); 
     ent.add(BasicComponent());
-    ent.number = 25;
-    
-    //ListenerId id;
-    //EventManager::subscribe<Entity, BasicEvent, &Entity::on_event>(&ent, id);
-    //EventManager::unsubscribe<BasicEvent>(id);
-    //EventManager::emit(BasicEvent(34));
+
+    std::cout << ent.number << std::endl;
 
     EventManager::emit(BasicEvent(101));
-
-    auto view = ECS::View<BasicComponent>(ecs);
-    for(auto [bs] : view) {
-        std::cout << "okay" << std::endl;
-    }
     
     return 0;
 }
