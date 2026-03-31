@@ -12,8 +12,9 @@ int main(int, char**)
     ECS& ecs = ECS::instance();
     ecs.register_type<BasicComponent>();
 
-    Entity& ent = ecs.create_object(25); 
+    Entity& ent = ecs.create_object(25); // EntityObj(25)
     ent.add(BasicComponent());
+    ent.destroy();
 
     std::cout << ent.number << std::endl;
 

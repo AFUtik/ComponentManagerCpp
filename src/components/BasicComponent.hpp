@@ -9,10 +9,12 @@
 using u64 = std::uint64_t;
 
 struct BasicComponent : public EntityComponent<BasicComponent> {
-    EventManager::Subscription<BasicComponent, u32, BasicEvent> sub;
-
     void init() override {
-        sub.add<BasicEvent, &BasicComponent::on_event>(this);
+        std::cout << "Component Init" << std::endl;
+    }
+
+    void drop() override {
+        std::cout << "Component Drop" << std::endl;   
     }
 
     void on_event(const BasicEvent &event) {

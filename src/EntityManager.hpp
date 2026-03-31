@@ -11,13 +11,17 @@ struct EntityObj : public IObject {
     EntityObj() = default;
     EntityObj(u64 number) : number(number) {}
     
+    void on_event(const BasicEvent& event) {
+        std::cout << event.data << std::endl;
+    };
+
     void init() override {
         std::cout << "Entity Init" << std::endl;   
     }
 
-    void on_event(const BasicEvent& event) {
-        std::cout << event.data << std::endl;
-    };
+    void drop() override {
+        std::cout << "Entity Drop" << std::endl;
+    }
 };
 
 struct ECS : ComponentManager<

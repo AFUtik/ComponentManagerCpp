@@ -32,7 +32,10 @@ using ComponentID = std::size_t;
 
 struct Empty {};
 
-struct IObject {virtual void init() = 0;};
+struct IObject {
+    virtual void init() {};
+    virtual void drop() {};
+};
 
 template <
     typename T,
@@ -44,10 +47,8 @@ struct ComponentManager {
     using BitsetComp = std::bitset< (MAX_COMPONENTS + 63) & ~size_t(63) >;
 
     static constexpr I invalid = std::numeric_limits<I>::max();
-
+    
     struct Object : public ObjBase {
-        I id = invalid;
-        
         Object() = default;
         Object(T *p, I id) : id(id), p(p) {}
         
@@ -69,14 +70,18 @@ struct ComponentManager {
             this->p->template remove_component<C>(*this);   
         }
 
-        inline bool is_valid() { return id < invalid;}
-
         inline void destroy() {
-            id = invalid;
-            p  = nullptr;
+            this->p->remove_object(*this);
         }
+
+        inline bool valid() { return id < invalid;}
+
+        inline I get_id() {return id;}
     private:
+        I id = invalid;
         T* p = nullptr;
+
+        friend struct ComponentManager;
     };
     
     using SparseSetObj =  AllocatedSerialSparseSet<Object, I, MAX_OBJECTS>;
@@ -93,8 +98,13 @@ struct ComponentManager {
             return result;
         }
     };
+
+    struct IComponent {
+        virtual void init() {};
+        virtual void drop() {};
+    };
     
-    struct BaseComponent {    
+    struct BaseComponent : public IComponent {    
         BaseComponent() = default;
 
         BaseComponent(const BaseComponent&) = delete;
@@ -103,17 +113,7 @@ struct ComponentManager {
         BaseComponent(BaseComponent&&) noexcept = default;
         BaseComponent& operator=(BaseComponent&&) noexcept = default;
 
-        virtual void init() {};
-
-        virtual void on_destroy() {};
-        
-        inline bool is_valid() {
-            return this->object_id < invalid;
-        }
-
-        inline void destroy() {
-            object_id = invalid;
-        }
+        inline bool valid() {return this->object_id < invalid;}
 
         I object_id = invalid;
     };
@@ -274,7 +274,7 @@ struct ComponentManager {
     }
 
     template <typename C>
-    inline C& add_component(Object& object, C &&component) {
+    inline C& add_component(const Object& object, C &&component) {
         static_assert(std::is_base_of_v<BaseComponent, C>);
         
         const u64 id = Component<C>::_id;
@@ -287,7 +287,7 @@ struct ComponentManager {
 
         ptr->object_id = object.id;
         components_mask[object.id].set(id);
-
+        
         ptr->init();
         
         return *ptr;
@@ -299,8 +299,11 @@ struct ComponentManager {
 
         const u64 id = Component<C>::_id;
         auto& array = components[id];
-        
-        array[object.id]->destroy();
+
+        BaseComponent* component = array[object.id];
+        component->drop();
+        new (component) BaseComponent();
+
         components_mask[object.id].reset(id);
     }
 
@@ -311,10 +314,10 @@ struct ComponentManager {
         return *reinterpret_cast<C*>(array[object.id]);
     } 
     
-    inline const SparseSetObj& get_objects() const {
-        return objects;   
-    }
-
+    inline const SparseSetObj& get_objects() const {return objects;}
+  
+    const Object& object_at(u64 i) const {return objects[i];}
+    
     template <typename... Args>
     inline Object& create_object(Args&&... args) {
         u64 i = objects.push(Object(static_cast<T*>(this), invalid, std::forward<Args>(args)...));
@@ -326,28 +329,21 @@ struct ComponentManager {
         obj.id = i;
         return obj;
     }
-    
-    const Object& object_at(u64 i) const {return objects[i];}
 
     inline void remove_object(Object& object) {
         BitsetComp& bitset = components_mask[object.id];
+        iterate_bitset(bitset, [this, id = object.id](size_t component_id) {
+            BaseComponent* component = components[component_id][id];
+            component->drop();
+            new (component) BaseComponent();
+        });
 
-        auto* data = reinterpret_cast<const uint64_t*>(&bitset);
-        constexpr size_t blocks = sizeof(bitset) / 8;
-
-        for (size_t b = 0; b < blocks; ++b) {
-            uint64_t v = data[b];
-            while (v) {
-                int bit = std::countr_zero(v);
-                size_t global = b * 64 + bit;
-
-                components[global][object.id]->destroy();
-
-                v &= v - 1;
-            }
+        if constexpr (std::is_base_of_v<IObject, ObjBase>) {
+            object.drop();
         }
+
+        object = Object();
         bitset.reset();
-        object.destroy();
     }
 
     inline void resize(usize size) {this->size = size;}
@@ -357,6 +353,24 @@ struct ComponentManager {
         components_mask.reserve(size);
     }
 private:
+    template <typename Fn>
+    void iterate_bitset(BitsetComp& bitset, Fn&& fn) {
+        auto* data = reinterpret_cast<const uint64_t*>(&bitset);
+        constexpr size_t blocks = sizeof(bitset) / 8;
+
+        for (size_t b = 0; b < blocks; ++b) {
+            uint64_t v = data[b];
+            while (v) {
+                int bit = std::countr_zero(v);
+                size_t global = b * 64 + bit;
+
+                fn(global);
+
+                v &= v - 1;
+            }
+        }
+    }
+
     template <typename C> ComponentArray& get_array() {
         const u64 id = Component<C>::_id;
         return components[id];
