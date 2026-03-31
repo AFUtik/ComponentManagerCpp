@@ -13,6 +13,7 @@ int main(int, char**)
     ecs.register_type<BasicComponent>();
 
     Entity& ent = ecs.create_object(); 
+    ent.add(BasicComponent());
     ent.number = 25;
     
     //ListenerId id;
@@ -20,11 +21,6 @@ int main(int, char**)
     //EventManager::unsubscribe<BasicEvent>(id);
     //EventManager::emit(BasicEvent(34));
 
-    
-    EventManager::Subscription<Entity, u16, BasicEvent> sub;
-    sub.add<BasicEvent, &Entity::on_event>(&ent);
-    
-    
     EventManager::emit(BasicEvent(101));
     
     return 0;

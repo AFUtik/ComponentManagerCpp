@@ -9,11 +9,13 @@
 using u64 = std::uint64_t;
 
 struct BasicComponent : public EntityComponent<BasicComponent> {
-    u64 number = 0;
+    EventManager::Subscription<BasicComponent, u32, BasicEvent> sub;
 
-    BasicComponent(u64 num) : number(num) {}
+    void init() override {
+        sub.add<BasicEvent, &BasicComponent::on_event>(this);
+    }
 
-    void print() {
-        std::cout << number << std::endl;
+    void on_event(const BasicEvent &event) {
+        std::cout << "Component: " << event.data << std::endl;
     }
 };

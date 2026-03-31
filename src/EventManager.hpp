@@ -55,7 +55,7 @@ struct EventManager {
         static constexpr I invalid = std::numeric_limits<I>::max();
         
         template <typename E>
-        static constexpr size_t index() {
+        static consteval size_t index() {
             return index_of<E, Events...>::value;
         }
 
@@ -79,11 +79,23 @@ struct EventManager {
             data[index<Event>()] = invalid;
         }
 
+        Subscription() {
+            data.fill(invalid);
+        }
+
         ~Subscription() {
-            (EventManager::unsubscribe<Events>(data[index<Events>()]), ...);
+            (remove_if_valid<Events>(), ...);
         }
     private:
-        std::array<I, sizeof...(Events)> data{invalid};
+        template <typename E>
+        void remove_if_valid() {
+            const I id = data[index<E>()];
+            if (id != invalid) {
+                EventManager::unsubscribe<E>(id);
+            }
+        }
+
+        std::array<I, sizeof...(Events)> data{};
     };
 
     template<typename Event>

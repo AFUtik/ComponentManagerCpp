@@ -274,10 +274,12 @@ struct ComponentManager {
         array.resize(object.id + 1);
 
         C* ptr = reinterpret_cast<C*>(array[object.id]);
-        new (ptr) C(std::move(component));
+        new (ptr) C(std::forward<C>(component));
 
         ptr->object_id = object.id;
         components_mask[object.id].set(id);
+
+        ptr->init();
         
         return *ptr;
     }
