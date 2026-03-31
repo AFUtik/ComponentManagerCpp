@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "../EntityManager.hpp"
+#include "../EventManager.hpp"
 
 using u64 = std::uint64_t;
 

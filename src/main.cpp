@@ -4,7 +4,7 @@
 #include "collections/SparseSet.hpp"
 #include "components/BasicComponent.hpp"
 
-using ListenerId = u64;
+using SubId = u16;
 
 int main(int, char**)
 {
@@ -20,15 +20,12 @@ int main(int, char**)
     //EventManager::unsubscribe<BasicEvent>(id);
     //EventManager::emit(BasicEvent(34));
 
-    FlatDenseMap<u16, u16> sparse_set;
-    sparse_set.push(4993, 1);
-    sparse_set.push(4999, 2);
-    sparse_set.push(5000, 3);
-
-    for(u16 v : sparse_set) {
-        std::cout << v << std::endl;
-    }
+    EventManager::Subscription<Entity, u16, BasicEvent> sub;
     
+    sub.add<BasicEvent, &Entity::on_event>(&ent);
+    sub.remove<BasicEvent>();
 
+    EventManager::emit(BasicEvent(101));
+    
     return 0;
 }
