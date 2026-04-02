@@ -156,27 +156,15 @@ template<
 struct SerialSparseSet {
     static constexpr u64 MAX = std::numeric_limits<I>::max();
 
-    u64 push(T& data) {
+    template <typename U>
+    u64 push(U&& data) {
         if(_size >= _capacity) {
             assert(_capacity != MAX);
             allocate();
         }
 
         sparse[static_cast<u64>(_size)] = _size;
-        dense[static_cast<u64>(_size)]  = std::move(data);
-        _size++;
-
-        return _size - 1;
-    }
-
-    u64 push(T&& data) {
-        if(_size >= _capacity) {
-            assert(_capacity != MAX);
-            allocate();
-        }
-
-        sparse[static_cast<u64>(_size)] = _size;
-        dense[static_cast<u64>(_size)]  = std::forward<T>(data);
+        dense[static_cast<u64>(_size)]  = std::forward<U>(data);
         _size++;
 
         return _size - 1;
