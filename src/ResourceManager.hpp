@@ -13,11 +13,14 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
 
-
-
 template<typename T>
 class ResourceManager;
 
+template<typename T>
+struct GlobalResource
+{
+    u32 id = std::numeric_limits<u32>::max();
+};
 
 template<typename T>
 struct ResourceManager {
@@ -25,19 +28,6 @@ struct ResourceManager {
     
     using CreateFn = T(*)();
     
-    struct ConstResource {
-        ConstResource() = default;
-    private:
-        ConstResource(u32 id) : id(id) {}
-
-        u32 id = invalid;
-
-        friend struct ResourceManager;
-
-        friend struct ManagedResource;
-        friend struct ReferencedResource;
-    };
-
     struct ManagedResource {
         ManagedResource() = default;
 
@@ -69,6 +59,9 @@ struct ResourceManager {
                 id=invalid;
             }
         }
+
+        // id can point to other object after destruction of ReferencedResource. //
+        inline u32 get_id_nosafe() const {return id;}
     private:
         ManagedResource(u32 id) : id(id) {}
 
@@ -112,7 +105,10 @@ struct ResourceManager {
             return *this;
         }
 
-        inline bool valid() {return id != invalid && ResourceManager::instance().get_ref_count(*this) != 0;}
+        inline bool valid() {return id != invalid;}
+
+        // id can point to other object after destruction of ManagedResource. //
+        inline u32 get_id_nosafe() const {return id;}
     private:
         ReferencedResource(u32 id) : id(id) {}
 
@@ -124,59 +120,70 @@ struct ResourceManager {
         u32 id = invalid;
 
         friend class ResourceManager;
-    };
-
+    };  
+    
     static ResourceManager& instance() {
         static ResourceManager manager;
         return manager;   
     }
-
-    inline ConstResource get(const std::string& key) {
-        assert(!key.empty());
-
-        auto it = resource_map.find(key);
-
-        assert(it!=resource_map.end());
-        assert(it->second!=invalid && "The resource was allocated");
-
-        return Resource(it->second);
+    
+    inline T& get_data(u32 id) 
+    {
+        return resource_set[id];
     }
 
-    inline void rename(const std::string& key, const std::string& new_key) {
-        assert(!key.empty());
-        
-        auto it = resource_map.find(key);
+    inline T& get_data(const ManagedResource& resource) 
+    {
+        return resource_set[resource.id];
+    }
 
-        assert(it!=resource_map.end());
-        assert(it->second!=invalid && "The resource was allocated");
-
-        u32 id = it->second;
-
-        resource_map.erase(it);
-        resource_map.emplace(new_key, id);
-
-        keys[id] = new_key;
+    inline T& get_data(const ReferencedResource& resource) 
+    {
+        return resource_set[resource.id];
     }
 
     inline const SerialSparseSet<T, u32>& get_resources() 
     {
         return resource_set;
     }
-private:
-    std::unordered_map<std::string, u32> resource_map;
-    
-    SerialSparseSet<T, u32> resource_set;
-    std::vector<CreateFn>   resource_factory;
 
+    template <typename U>
+    inline const GlobalResource<T> create(const std::string &name, U&& resource) {
+        const u32 id = resource_set.push(std::forward<U>(resource));
+        resource_map.emplace(name, id);
+        return GlobalResource<T>(id);
+    }
+    
+    inline const GlobalResource<T> get(const std::string& name) 
+    {
+        return GlobalResource<T>(resource_map[name]);
+    }
+    
+    template <typename U>
+    inline ManagedResource create_managed(U&& resource) {
+        const u32 id = resource_set.push(std::forward<U>(resource));
+        return ManagedResource(id);
+    }
+
+    template <typename U>
+    inline ReferencedResource create_referenced(U&& resource) {
+        const u32 id = resource_set.push(std::forward<U>(resource));
+
+        if (id >= references_count.size()) references_count.resize(id + 1, 0);
+    
+        return ReferencedResource(id);
+    }
+private:
+    SerialSparseSet<T, u32> resource_set;
     std::vector<u32> references_count;
-    std::vector<std::string> keys;
+    std::unordered_map<std::string, u32> resource_map;
 
     // REFERENCED OP //
-    inline u32 get_ref_count(const ReferencedResource& resource) 
+    inline bool is_valid_reference(u32 id) 
     {
-        assert(resource.id < references_count.size());
+        assert(id < references_count.size());
 
-        return references_count[resource.id];
+        return references_count[id] > 0;
     }
 
     inline void increment_referenced(const ReferencedResource& resource) 
@@ -203,43 +210,6 @@ private:
         assert(resource.id != invalid);
 
         resource_set.erase(resource.id);
-
-        if(resource.id >= keys.size()) return;
-        
-        std::string &key = keys[resource.id];
-        if(!key.empty()) {
-            auto it = resource_map.find(key);
-            if(it != resource_map.end()) resource_map.erase(it);
-            
-            key.clear();
-        }
-    }
-protected:
-    template <typename U>
-    inline ManagedResource create_managed(U&& resource) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-        return ManagedResource(id);
-    }
-
-    template <typename U>
-    inline ReferencedResource create_referenced(U&& resource) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-
-        if (id >= references_count.size()) references_count.resize(id + 1, 0);
-    
-        return ReferencedResource(id, &references_count[id]);
-    }
-
-    template <typename U>
-    inline ManagedResource create_managed(U&& resource, const std::string& key) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-
-        resource_map.emplace(key, id);
-
-        if(id > keys.size()) keys.resize(static_cast<u64>(id));
-        keys[id] = key;
-
-        return ManagedResource(id);
     }
 };
 
