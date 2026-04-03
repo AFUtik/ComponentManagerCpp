@@ -265,6 +265,126 @@ template<
     typename T,
     typename I = u64
 >
+struct SparseSet {
+    static constexpr u64 MAX = std::numeric_limits<I>::max();
+
+    template <typename U>
+    void push(U&& data, u64 index) {
+        while(index >= _capacity_sparse) allocate_sparse();
+        if(_size_dense >= _capacity_dense) allocate_dense();
+
+        sparse[index] = _size_dense;
+        dense[static_cast<u64>(_size_dense)] = std::forward<U>(data);
+        dense_ids[static_cast<u64>(_size_dense)] = index;
+        _size_dense++;
+    }
+
+    inline void erase(u64 id) {
+        const size_t index = sparse[id];
+        const size_t last_index = dense_ids[_size_dense - 1];
+
+        dense[index] = std::move(dense[_size_dense - 1]);
+        sparse[last_index] = index;
+
+        _size_dense--;
+    }
+
+    bool contains(u64 id) const {
+        size_t index = sparse[id];
+        return index < _size_sparse;
+    }
+
+    u64 size() const {
+        return _size_dense;   
+    }
+
+    T& operator[](u64 id) {
+        return dense[sparse[id]];
+    }
+
+    const T& operator[](u64 id) const {
+        return dense[sparse[id]];
+    }
+
+    struct Iterator {
+        Iterator(std::unique_ptr<T[]>& dense, u64 index) : dense(dense), index(index) {}
+
+        inline T& operator*() {
+            return dense[index];
+        }
+
+        inline void operator++() {++index;}
+
+        inline bool operator!=(const Iterator& other) const {return index != other.index;}
+    private:
+        std::unique_ptr<T[]>& dense;
+        u64 index = 0;
+    };
+
+    struct ConstIterator {
+        ConstIterator(const std::unique_ptr<T[]>& dense, u64 index) : dense(dense), index(index) {}
+
+        inline const T& operator*() const {
+            return dense[index];
+        }
+
+        inline void operator++() const {++index;}
+
+        inline bool operator!=(ConstIterator& other) const {return index != other.index;}
+    private:
+        std::unique_ptr<T[]>& dense;
+        mutable u64 index = 0;
+    };
+
+    auto begin() {return Iterator(dense, 0);}
+
+    auto end() {return Iterator(dense, _size_dense);}
+
+    auto begin() const {return ConstIterator(dense, 0);}
+
+    auto end() const {return ConstIterator(dense, _size_dense);}
+
+    SparseSet(u64 reserve = 0) : _capacity_dense(static_cast<I>(reserve)), _capacity_sparse(static_cast<I>(reserve)) {}
+private:
+    inline void allocate_sparse() {
+        size_t new_capacity = _capacity_sparse ? _capacity_sparse * 2 : 1;
+        auto new_sparse  = std::make_unique<T[]>(new_capacity);
+        std::memcpy(new_sparse.get(), sparse.get(), _size_sparse * sizeof(I));
+        sparse = std::move(new_sparse);
+        _capacity_sparse = new_capacity;
+    }
+
+    inline void allocate_dense() {
+        size_t new_capacity = _capacity_dense ? _capacity_dense * 2 : 1;
+        auto new_dense     = std::make_unique<T[]>(new_capacity);
+        auto new_dense_ids = std::make_unique<T[]>(new_capacity);
+
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(new_dense.get(), dense.get(), _size_dense * sizeof(T));
+        } else {
+            std::move(dense.get(), dense.get() + _size_dense, new_dense.get());
+        }
+        std::memcpy(new_dense_ids.get(), dense_ids.get(), _size_dense * sizeof(I));
+
+        dense     = std::move(new_dense);
+        dense_ids = std::move(new_dense_ids);
+        _capacity_dense = new_capacity;
+    }
+
+    std::unique_ptr<T[]> dense;
+    std::unique_ptr<I[]> dense_ids; 
+    std::unique_ptr<I[]> sparse;
+    I _size_dense  = 0;
+    I _size_sparse = 0;
+    I _capacity_dense  = 0;
+    I _capacity_sparse = 0;
+};
+
+
+template<
+    typename T,
+    typename I = u64
+>
 struct FlatDenseMap {
     static constexpr u64 MAX = std::numeric_limits<I>::max();
 

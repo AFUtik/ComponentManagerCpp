@@ -9,16 +9,7 @@ using SubId = u16;
 int main(int, char**)
 {
     // Example //
-    ECS& ecs = ECS::instance();
-    ecs.register_type<BasicComponent>();
-
-    Entity& ent = ecs.create_object(25); // EntityObj(25)
-    ent.add(BasicComponent());
-    ent.destroy();
-
-    std::cout << ent.number << std::endl;
-
-    EventManager::emit(BasicEvent(101));
+    
     
     return 0;
 }
