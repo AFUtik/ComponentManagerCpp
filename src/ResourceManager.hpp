@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "collections/Freelist.hpp"
 #include "collections/SparseSet.hpp"
 
 using u8  = std::uint8_t;
@@ -13,30 +14,60 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
 
-template<typename T>
-struct GlobalResource
-{
-private:
-    GlobalResource(u32 id) : id(id) {}
+static constexpr u32 invalid = std::numeric_limits<u32>::max();
 
-    u32 id = std::numeric_limits<u32>::max();
+struct __ReferenceController
+{   
+    static inline __ReferenceController& instance() 
+    {
+        static __ReferenceController controller;
+        return controller;
+    }
+private:    
+    Freelist<u32, u32> ref_counters;
+    std::vector<u32> ids;
+
+    inline u32 create_reference(u32 resource_id)
+    {
+        const u32 id = ref_counters.push(0);
+        ids.resize(id+1, invalid);
+        ids[id] = resource_id; 
+        return id;
+    }
+
+    inline void increment_reference(u32 ref_id)
+    {
+        ref_counters[ref_id]++; 
+    }
+
+    template <typename T>
+    inline void decrement_reference(u32 resource_id, u32 ref_id) 
+    {
+        if(--ref_counters[ref_id] == 0) {
+            T::instance().release(resource_id); 
+            ids[ref_id] = invalid;
+        }
+    }
+
+    inline bool expired(u32 resource_id, u32 ref_id) 
+    {
+        return ref_counters[resource_id] == 0 || ids[ref_id] != resource_id;
+    }
 
     template<typename, typename>
-    friend struct ResourceManager;
+    friend class ResourceManager;
 };
 
 template<typename T, typename MapKey = std::string>
 struct ResourceManager {
-    static constexpr u32 invalid = std::numeric_limits<u32>::max();
-    
     using CreateFn = T(*)();
-    
+
     struct ManagedResource {
         ManagedResource() = default;
 
         ~ManagedResource()
         {
-            if(id!=invalid) ResourceManager::instance().release_managed(*this);
+            if(id!=invalid) ResourceManager::instance().release(id);
         }
         
         ManagedResource(const ManagedResource&) = delete;
@@ -48,7 +79,7 @@ struct ResourceManager {
 
         ManagedResource& operator=(ManagedResource&& other) noexcept {
             if (this != &other) {
-                if(id!=invalid) ResourceManager::instance().release_managed(*this);
+                if(id!=invalid) ResourceManager::instance().release(id);
 
                 id = other.id;
                 other.id = invalid;
@@ -58,7 +89,7 @@ struct ResourceManager {
 
         inline void release() {
             if(id!=invalid) {
-                ResourceManager::instance().release_managed(*this);
+                ResourceManager::instance().release(id);
                 id=invalid;
             }
         }
@@ -77,7 +108,7 @@ struct ResourceManager {
         ReferencedResource() = default;
 
         ~ReferencedResource() {
-            if(id!=invalid) ResourceManager::instance().release_referenced(*this);
+            if(id!=invalid) __ReferenceController::instance().decrement_reference<ResourceManager>(id, ref_id);
         }
 
         ReferencedResource(ReferencedResource&& other) noexcept {
@@ -86,7 +117,7 @@ struct ResourceManager {
 
         ReferencedResource& operator=(ReferencedResource&& other) noexcept {
             if (this != &other) {
-                if(id!=invalid) ResourceManager::instance().release_referenced(*this);
+                if(id!=invalid) __ReferenceController::instance().decrement_reference<ResourceManager>(id, ref_id);
                 move_from(other);
             }
             return *this;
@@ -94,126 +125,120 @@ struct ResourceManager {
 
         ReferencedResource(const ReferencedResource& other) : id(other.id)
         {
-            if(id!=invalid) ResourceManager::instance().increment_referenced(*this);
+            if(id!=invalid) __ReferenceController::instance().increment_reference(ref_id);
         }
         
         ReferencedResource& operator=(const ReferencedResource& other) {
             if (this != &other) {
-                if(id!=invalid) ResourceManager::instance().release_referenced(*this);
+                if(id!=invalid) __ReferenceController::instance().decrement_reference<ResourceManager>(id, ref_id);
 
-                id = other.id;
+                id = other.id; ref_id = other.ref_id;
 
-                if(id!=invalid) ResourceManager::instance().increment_referenced(*this);
+                if(id!=invalid) __ReferenceController::instance().increment_reference(ref_id);
             }
             return *this;
         }
 
-        inline bool valid() {return id != invalid;}
+        explicit operator bool() const {return id != invalid && ref_id != invalid;}
 
         // id can point to other object after destruction of ManagedResource. //
         inline u32 get_id_nosafe() const {return id;}
     private:
-        ReferencedResource(u32 id) : id(id) {}
+        ReferencedResource(u32 id) : id(id), ref_id(__ReferenceController::instance().create_reference(id)) {}
 
         inline void move_from(ReferencedResource& other) {
             id = other.id;
+            ref_id = other.ref_id;
+
             other.id = invalid;
+            other.ref_id = invalid;
         }
 
         u32 id = invalid;
+        u32 ref_id = invalid;
 
         friend class ResourceManager;
-    };  
+    };
+
+    struct WeakResource {
+        inline bool expired() const {
+            return id != invalid && ref_id != invalid ? __ReferenceController::instance().expired(id, ref_id) : true;
+        }
+
+        inline ReferencedResource ref() {
+            return expired() ? ReferencedResource() : ReferencedResource(id, ref_id);
+        }
+
+        WeakResource() {}
+
+        WeakResource(const ReferencedResource& other) : id(other.id), ref_id(other.ref_id) {}
+        
+        WeakResource& operator=(const ReferencedResource& other) {
+            id = other.id;
+            ref_id = other.ref_id;
+        }
+    private:
+        u32 id = invalid;
+        u32 ref_id = invalid;
+    };
     
+    struct ResourceFactory {
+        CreateFn create_fn = nullptr;
+    private:
+        WeakResource weak_resource;
+    };
+
     static ResourceManager& instance() {
         static ResourceManager manager;
         return manager;   
     }
-    
-    inline T& get_data(GlobalResource<T> resource) 
+
+    inline T& get(u32 id) 
     {
-        return resource_set[resource.id];
+        return resources[id];
     }
 
     inline T& get_data(const ManagedResource& resource) 
     {
-        return resource_set[resource.id];
+        return resources[resource.id];
     }
 
     inline T& get_data(const ReferencedResource& resource) 
     {
-        return resource_set[resource.id];
+        return resources[resource.id];
     }
 
     inline const SerialSparseSet<T, u32>& get_resources() 
     {
-        return resource_set;
-    }
-
-    template <typename U>
-    inline const GlobalResource<T> create(const MapKey &key, U&& resource) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-        resource_map.emplace(key, id);
-        return GlobalResource<T>(id);
+        return resources;
     }
     
-    inline const GlobalResource<T> get(const MapKey& key) 
-    {
-        return GlobalResource<T>(resource_map.at(key));
-    }
-    
-    template <typename U>
-    inline ManagedResource create_managed(U&& resource) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-        return ManagedResource(id);
-    }
-
-    template <typename U>
-    inline ReferencedResource create_referenced(U&& resource) {
-        const u32 id = resource_set.push(std::forward<U>(resource));
-
-        if (id >= references_count.size()) references_count.resize(id + 1, 0);
-    
-        return ReferencedResource(id);
+    template <typename K, typename U>
+    requires (std::derived_from<K, ReferencedResource> || std::derived_from<K, ManagedResource>)
+    inline K create(U&& resource) {
+        return K(resources.push(std::forward<U>(resource)));
     }
 private:
-    SerialSparseSet<T, u32> resource_set;
-    std::vector<u32> references_count;
-    std::unordered_map<MapKey, u32> resource_map;
+    SerialSparseSet<T, u32> resources;
+    T default_resource;
 
-    // REFERENCED OP //
-    inline bool is_valid_reference(u32 id) 
-    {
-        assert(id < references_count.size());
+    std::unordered_map<MapKey, u32> factory_map;
+    std::vector<ResourceFactory>    factories;
 
-        return references_count[id] > 0;
-    }
-
-    inline void increment_referenced(const ReferencedResource& resource) 
-    {
-        assert(resource.id != invalid);
-
-        references_count[resource.id]++;
-    }
-
-    inline void release_referenced(ReferencedResource& resource) 
-    {
-        const u32 id = resource.id;
-        assert(id != invalid);
-        
-        if (--references_count[id] == 0)
-        {
-            resource_set.erase(id);
-            references_count[id] = 0;
-        }
-    }
-    
-    // MANAGED OP //
-    inline void release_managed(const ManagedResource& resource) {
-        assert(resource.id != invalid);
-
-        resource_set.erase(resource.id);
-    }
+    inline void release(u32 resource_id) {resources.erase(resource_id);}
 };
 
+template <typename T, typename MapKey>
+struct Resource
+{
+    using Manager = ResourceManager<T, MapKey>;
+    const Manager& rm = Manager::instance();
 
+private:
+    Resource(const MapKey& key) {
+        
+    }
+
+    Manager::ReferencedResource resource_ref;
+    u32 factory_id = invalid;
+};

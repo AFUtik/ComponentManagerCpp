@@ -112,24 +112,6 @@ public:
 
     inline void erase(I index) {
         assert(index < _size);
-        if (index == _size - 1) {
-            vec.pop_back();
-            next.pop_back();
-            _size--;
-
-            while (_size > 0 && free_head == _size) {
-                free_head = next[free_head];
-                vec.pop_back();
-                next.pop_back();
-                _size--;
-            }
-
-            if (_size == 0) {
-                free_head = invalid;
-            }
-
-            return;
-        }
         vec[index] = T{};
         next[index] = free_head;
         free_head = index;
