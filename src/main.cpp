@@ -4,18 +4,27 @@
 
 using SubId = u16;
 
-struct TextureManager : ResourceManager<uint32_t> {
+struct Texture {
+    uint32_t some_data;   
+};
+
+enum TextureRegistry {
+    DefaultTexture
+};
+
+struct TextureManager : ResourceManager<Texture, TextureRegistry> {
 
 };
 
 int main(int, char**)
 {
     auto& rm = TextureManager::instance();
-    GlobalResource<uint32_t> res = rm.create("number:ten", 10); // global resource //
 
-    auto number = rm.get_data(res.id);
+    GlobalResource<Texture> res = rm.create(TextureRegistry::DefaultTexture, Texture(34));
 
-    std::cout << number << std::endl;
+    Texture& number = rm.get_data(res);
+
+    std::cout << number.some_data << std::endl;
 
     return 0;
 }

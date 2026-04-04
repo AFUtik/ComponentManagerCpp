@@ -14,15 +14,18 @@ using u64 = std::uint64_t;
 using usize = u64;
 
 template<typename T>
-class ResourceManager;
-
-template<typename T>
 struct GlobalResource
 {
+private:
+    GlobalResource(u32 id) : id(id) {}
+
     u32 id = std::numeric_limits<u32>::max();
+
+    template<typename, typename>
+    friend struct ResourceManager;
 };
 
-template<typename T>
+template<typename T, typename MapKey = std::string>
 struct ResourceManager {
     static constexpr u32 invalid = std::numeric_limits<u32>::max();
     
@@ -127,9 +130,9 @@ struct ResourceManager {
         return manager;   
     }
     
-    inline T& get_data(u32 id) 
+    inline T& get_data(GlobalResource<T> resource) 
     {
-        return resource_set[id];
+        return resource_set[resource.id];
     }
 
     inline T& get_data(const ManagedResource& resource) 
@@ -148,15 +151,15 @@ struct ResourceManager {
     }
 
     template <typename U>
-    inline const GlobalResource<T> create(const std::string &name, U&& resource) {
+    inline const GlobalResource<T> create(const MapKey &key, U&& resource) {
         const u32 id = resource_set.push(std::forward<U>(resource));
-        resource_map.emplace(name, id);
+        resource_map.emplace(key, id);
         return GlobalResource<T>(id);
     }
     
-    inline const GlobalResource<T> get(const std::string& name) 
+    inline const GlobalResource<T> get(const MapKey& key) 
     {
-        return GlobalResource<T>(resource_map[name]);
+        return GlobalResource<T>(resource_map.at(key));
     }
     
     template <typename U>
@@ -176,7 +179,7 @@ struct ResourceManager {
 private:
     SerialSparseSet<T, u32> resource_set;
     std::vector<u32> references_count;
-    std::unordered_map<std::string, u32> resource_map;
+    std::unordered_map<MapKey, u32> resource_map;
 
     // REFERENCED OP //
     inline bool is_valid_reference(u32 id) 
