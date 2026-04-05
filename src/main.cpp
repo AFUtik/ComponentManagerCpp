@@ -16,15 +16,17 @@ struct TextureManager : ResourceManager<Texture, TextureRegistry> {
 
 };
 
+static Texture create_texture(u32 some_data) {
+    return Texture(some_data);
+}
+
 int main(int, char**)
 {
+    ResourceFactory<Texture, TextureRegistry, u32>::instance().register_factory(create_texture);
     auto& rm = TextureManager::instance();
-
-    GlobalResource<Texture> res = rm.create(TextureRegistry::DefaultTexture, Texture(34));
-
-    Texture& number = rm.get_data(res);
-
-    std::cout << number.some_data << std::endl;
+    
+    Resource texture = Resource<Texture, TextureRegistry>::load(TextureRegistry::DefaultTexture, 34u);
+    std::cout << texture.get().some_data << std::endl;
 
     return 0;
 }
