@@ -4,20 +4,15 @@
 #include <bitset>
 #include <cassert>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <memory>
-#include <string>
 #include <type_traits>
-#include <typeinfo>
-#include <unordered_map>
 #include <utility>
 #include <array>
 #include <new>
 #include <concepts>
 #include <bit>
 #include <cstdint>
-#include <iostream>
 
 #include "collections/SparseSet.hpp"
 
@@ -26,9 +21,6 @@ using u16 = std::uint16_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using usize = u64;
-
-constexpr std::size_t MAX_COMPONENTS = 256;
-using ComponentID = std::size_t;
 
 struct Empty {};
 
@@ -41,8 +33,7 @@ template <
     typename T,
     typename I,
     typename ObjBase,
-    u64 MAX_COMPONENTS,
-    u64 MAX_OBJECTS>
+    size_t MAX_COMPONENTS>
 struct ComponentManager {
     using BitsetComp = std::bitset< (MAX_COMPONENTS + 63) & ~size_t(63) >;
 
@@ -56,27 +47,27 @@ struct ComponentManager {
         Object(T *p, I id, Args&&... args) : ObjBase(std::forward<Args>(args)...), id(id), p(p) {}
                     
         template <typename C>
-        inline C& get() const {
+        C& get() const {
             return this->p->template get_component<C>(*this);
         }
 
         template <typename C>
-        inline void add(C&& component) {
+        void add(C&& component) {
             this->p->template add_component<C>(*this, std::forward<C>(component));   
         }
 
         template <typename C>
-        inline void remove() {
+        void remove() {
             this->p->template remove_component<C>(*this);   
         }
 
-        inline void destroy() {
+        void destroy() {
             this->p->remove_object(*this);
         }
 
-        inline bool valid() { return id < invalid;}
+        bool valid() { return id < invalid;}
 
-        inline I get_id() {return id;}
+        I get_id() {return id;}
     private:
         I id = invalid;
         T* p = nullptr;
@@ -84,27 +75,24 @@ struct ComponentManager {
         friend struct ComponentManager;
     };
     
-    using SparseSetObj =  AllocatedSerialSparseSet<Object, I, MAX_OBJECTS>;
-
     struct ComponentType {
         u64 id;
         usize size;
+        usize align;
+        void (*destroy)(void*) = nullptr;
 
         template<typename C>
-        constexpr static inline ComponentType from(u64 id) {
-            ComponentType result;
-            result.id = id;
-            result.size = sizeof(C) + alignof(C);
-            return result;
+        static ComponentType from(u64 id) {
+            return {
+                id,
+                sizeof(C),
+                alignof(C),
+                [](void* p) { std::destroy_at(static_cast<C*>(p)); }
+            };
         }
     };
 
-    struct IComponent {
-        virtual void init() {};
-        virtual void drop() {};
-    };
-    
-    struct BaseComponent : public IComponent {    
+    struct BaseComponent {    
         BaseComponent() = default;
 
         BaseComponent(const BaseComponent&) = delete;
@@ -112,141 +100,180 @@ struct ComponentManager {
 
         BaseComponent(BaseComponent&&) noexcept = default;
         BaseComponent& operator=(BaseComponent&&) noexcept = default;
-
-        inline bool valid() {return this->object_id < invalid;}
-
-        I object_id = invalid;
     };
  
     template <typename C> 
     struct Component : public BaseComponent {
         inline static u64 _id;
         inline static T *_p;
+        u8 block = 0;
 
-        inline const Object& object() const {
-            return this->parent().object_at(this->object_id);
+        const Object& object() const {
+            return _p->object_at( _p->template get_array<C>().get_index(block, this) );
         } 
 
-        inline T& parent() const {
+        T& parent() const {
             return *Component<C>::_p;
         }
     };
 
+    template <typename C>
+    struct PlainComponent : public BaseComponent {
+        inline static u64 _id;
+        inline static T *_p;
+    };
+    
     struct ComponentArray {
-        static constexpr auto BLOCK_SIZE = 512;
-        static constexpr auto NUM_BLOCKS = (MAX_OBJECTS / BLOCK_SIZE) + 1;
-
-        struct AlignedArrayDeleter {
-            void operator()(u8* ptr) const noexcept {
-                ::operator delete[](ptr, std::align_val_t(16));
-            }
-        };
+        static constexpr std::size_t BLOCK_SIZE = 512;
 
         struct Block {
-            const ComponentArray *parent = nullptr;
-            std::unique_ptr<u8[], AlignedArrayDeleter> data = nullptr;
+            ComponentArray* parent = nullptr;
+
+            std::size_t align = alignof(std::max_align_t);
+            std::unique_ptr<std::byte[], void(*)(void*)> data{nullptr, nullptr};
 
             Block() = default;
 
-            Block(const ComponentArray *parent, usize n) : parent(parent) {
-                const auto data_size = BLOCK_SIZE * this->parent->type->size;
+            Block(ComponentArray* parent) : 
+                parent(parent),
+                align(parent->type->align),
+                data(nullptr, [align = this->align](void* p) {
+                    ::operator delete[](p, std::align_val_t(align));
+                })
+            {
+                const std::size_t data_size = BLOCK_SIZE * this->parent->type->size;
 
-                this->data = std::unique_ptr<u8[], AlignedArrayDeleter>(new (std::align_val_t(16)) u8[data_size]);
+                void* raw = ::operator new[](data_size, std::align_val_t(this->parent->type->align));
+                data.reset(static_cast<std::byte*>(raw));
 
                 std::memset(data.get(), 0, data_size);
             }
 
-            inline BaseComponent* operator[](usize i) const {
+            BaseComponent* operator[](std::size_t i) const {
                 assert(i < BLOCK_SIZE);
-                return reinterpret_cast<BaseComponent*>(reinterpret_cast<u8*>(this->data.get()) + (this->parent->type->size * i));
+                return reinterpret_cast<BaseComponent*>(
+                    data.get() + (this->parent->type->size * i)
+                );
             }
         };
-        
-        ComponentType* type = nullptr;
 
-        Block blocks[NUM_BLOCKS];
-        usize blocks_cnt = 0;
+        ComponentType* type = nullptr;
+        std::vector<Block> blocks;
 
         ComponentArray() = default;
-        ComponentArray(ComponentType *type) : type(type) {}
+        ComponentArray(ComponentType* type) : type(type) {}
 
-        void resize(usize n) {
-            while(n > (this->blocks_cnt * BLOCK_SIZE)) {
-                assert(this->blocks_cnt != NUM_BLOCKS);
-                this->blocks[this->blocks_cnt] = Block(this, this->blocks_cnt);
-                this->blocks_cnt++;
+        void resize(std::size_t n) {
+            const std::size_t needed_blocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            while (blocks.size() < needed_blocks) {
+                blocks.emplace_back(this);
             }
         }
 
-        inline usize size() const {
-            return blocks_cnt*BLOCK_SIZE;
+        BaseComponent* operator[](std::size_t i) const {
+            return blocks[i / BLOCK_SIZE][i % BLOCK_SIZE];
         }
 
-        inline u8 block(usize i) {
-            return i / BLOCK_SIZE;
-        }
+        inline std::size_t get_index(u8 block, const void* ptr) const {
+            const std::byte* base = blocks[block].data.get();
 
-        inline BaseComponent* operator[](usize i) const {
-            return this->blocks[i / BLOCK_SIZE][i % BLOCK_SIZE];
+            auto offset = reinterpret_cast<const std::byte*>(ptr) - base;
+            std::size_t local_index = offset / this->type->size;
+
+            return block * BLOCK_SIZE + local_index;
         }
     };
 
     template<typename... Components>
     requires (std::derived_from<Components, BaseComponent> && ...)
     struct View {
-        View(T &_p) : _p(_p) {}
+        View(T& p) : _p(p) {
+            (_required_mask.set(Component<Components>::_id), ...);
+
+            _arrays = std::make_tuple(
+                &_p.template get_array<Components>()...
+            );
+        }
 
         struct Iterator {
-            using arr_iter = std::array<Object, MAX_OBJECTS>::iterator;
+            using set_iter = typename SerialSparseSet<Object>::iterator;
 
-            Iterator(T& _p, arr_iter&& obj_iter) : _p(_p), obj_iter(std::move(obj_iter)) {
+            struct EndTag {};
+
+            Iterator(T& p,
+                    set_iter iter,
+                    const BitsetComp& mask,
+                    std::array<ComponentArray*, sizeof...(Components)> arrays)
+                : _p(p)
+                , obj_iter(std::move(iter))
+                , _required_mask(mask)
+                , _arrays(arrays)
+            {
                 skip_invalid();
             }
-            
-            inline auto operator*() {
-                const Object& e = *obj_iter;
-                return std::tuple<Components&...>(
-                    _p.template get_component<Components>(e)...
-                );
+
+            Iterator(T& p, set_iter iter, EndTag)
+                : _p(p)
+                , obj_iter(std::move(iter))
+            {}
+
+            auto operator*() const {
+                const I id = (*obj_iter).get_id();
+                return get_components(id, std::index_sequence_for<Components...>{});
             }
 
-            inline void operator++() {
+            Iterator& operator++() {
                 ++obj_iter;
                 skip_invalid();
+                return *this;
             }
 
-            inline bool operator!=(const Iterator& other) const {
+            bool operator!=(const Iterator& other) const {
                 return obj_iter != other.obj_iter;
             }
 
-            inline bool operator==(const Iterator& other) const {
+            bool operator==(const Iterator& other) const {
                 return obj_iter == other.obj_iter;
             }
-        private:
-            arr_iter obj_iter;
-            T &_p;
 
-            inline void skip_invalid() {
-                while (obj_iter != _p.objects.end()) 
-                {
-                    const Object& e = *obj_iter;
-                    if ((_p.template has_component<Components>(e) && ...)) {
-                        break;
-                    }
+        private:
+            set_iter obj_iter;
+            T& _p;
+            BitsetComp _required_mask;
+            std::array<ComponentArray*, sizeof...(Components)> _arrays;
+
+            void skip_invalid() {
+                while (obj_iter != _p.objects.end()) {
+                    const I id = (*obj_iter).get_id();
+                    const BitsetComp& mask = _p.components_mask[id];
+
+                    if ((mask & _required_mask) == _required_mask) break;
                     ++obj_iter;
                 }
+            }
+
+            template<std::size_t... Is>
+            auto get_components(I id, std::index_sequence<Is...>) const {
+                return std::tuple<Components&...>(
+                    *reinterpret_cast<Components*>(
+                        (*std::get<Is>(_arrays))[id]
+                    )...
+                );
             }
         };
 
         Iterator begin() {
-            return Iterator(_p, _p.objects.begin());
+            return Iterator(_p, _p.objects.begin(), _required_mask, _arrays);
         }
 
         Iterator end() {
-            return Iterator(_p, _p.objects.end());
+            return Iterator(_p, _p.objects.end(), typename Iterator::EndTag{});
         }
+
     private:
-        T &_p;
+        T& _p;
+        BitsetComp _required_mask;
+        std::array<ComponentArray*, sizeof...(Components)> _arrays;
     };
 
     template <typename V>
@@ -254,7 +281,7 @@ struct ComponentManager {
     void register_type() {
         const u64 id = this->components_cnt++;
         assert(this->components_cnt <= MAX_COMPONENTS);
-     
+
         Component<V>::_id = id;
         V::_p = static_cast<T*>(this);
         this->components_types[id] = ComponentType::template from<V>(id);
@@ -269,40 +296,36 @@ struct ComponentManager {
         const u64 id = Component<C>::_id;
         auto& array = components[id];
 
-        if(array.blocks_cnt * ComponentArray::BLOCK_SIZE < object.id) return false;
         return components_mask[object.id][id];
     }
 
     template <typename C>
-    inline C& add_component(const Object& object, C &&component) {
+    inline C& add_component(const Object& object, C&& component) {
         static_assert(std::is_base_of_v<BaseComponent, C>);
-        
+
         const u64 id = Component<C>::_id;
         auto& array = components[id];
 
         array.resize(object.id + 1);
 
-        C* ptr = reinterpret_cast<C*>(array[object.id]);
+        void* raw = array[object.id];
+        C* ptr = std::launder(reinterpret_cast<C*>(raw));
         new (ptr) C(std::forward<C>(component));
 
-        ptr->object_id = object.id;
         components_mask[object.id].set(id);
-        
-        ptr->init();
-        
+        ptr->block = object.id / ComponentArray::BLOCK_SIZE;
+
         return *ptr;
     }
 
     template <typename C>
     inline void remove_component(Object& object) {
-        static_assert(std::is_base_of_v<BaseComponent, C>);
-
         const u64 id = Component<C>::_id;
+        auto& type = components_types[id];
         auto& array = components[id];
 
-        BaseComponent* component = array[object.id];
-        component->drop();
-        new (component) BaseComponent();
+        void* ptr = array[object.id];
+        type.destroy(ptr);
 
         components_mask[object.id].reset(id);
     }
@@ -310,13 +333,13 @@ struct ComponentManager {
     template <typename C>
     inline C& get_component(const Object& object) const {
         const u64 id = Component<C>::_id; 
-        auto& array = components[id];
-        return *reinterpret_cast<C*>(array[object.id]);
-    } 
+        assert(components_mask[object.id][id] && "Component not present");
+        return *reinterpret_cast<C*>(components[id][object.id]);
+    }
     
-    inline const SparseSetObj& get_objects() const {return objects;}
+    inline const SerialSparseSet<Object>& get_objects() const {return objects;}
   
-    const Object& object_at(u64 i) const {return objects[i];}
+    inline const Object& object_at(u64 i) const {return objects[i];}
     
     template <typename... Args>
     inline Object& create_object(Args&&... args) {
@@ -330,12 +353,11 @@ struct ComponentManager {
         return obj;
     }
 
-    inline void remove_object(Object& object) {
+    inline void remove_object(const Object& object) {
         BitsetComp& bitset = components_mask[object.id];
-        iterate_bitset(bitset, [this, id = object.id](size_t component_id) {
-            BaseComponent* component = components[component_id][id];
-            component->drop();
-            new (component) BaseComponent();
+        iterate_bitset(bitset, [this, object_id = object.id](size_t component_id) {
+            BaseComponent* component = components[component_id][object_id];
+            components_types[component_id].destroy(component);
         });
 
         if constexpr (std::is_base_of_v<IObject, ObjBase>) {
@@ -380,7 +402,7 @@ private:
     std::array<ComponentType,  MAX_COMPONENTS> components_types;
     u64 components_cnt = 0;
 
-    SparseSetObj objects;
+    SerialSparseSet<Object> objects;
     std::vector<BitsetComp> components_mask;
     u64 size = 0; 
 };

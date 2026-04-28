@@ -41,7 +41,7 @@ struct EventManager {
             return listeners.push(Listener{obj, call});
         }
 
-        inline void unsubscribe(u64 index) {
+        void unsubscribe(u64 index) {
             listeners.erase(index);
         }
 
@@ -99,18 +99,18 @@ struct EventManager {
     };
 
     template<typename Event>
-    static inline auto& bus() {
+    static auto& bus() {
         static EventBus<Event> instance;
         return instance;
     }
 
     template<typename Event>
-    static inline void emit(const Event& e) {
+    static void emit(const Event& e) {
         bus<Event>().emit(e);
     }
 
     template<typename T, typename Event, auto Method, typename I>
-    static inline I subscribe(T* obj) {
+    static I subscribe(T* obj) {
         return static_cast<I>(bus<Event>().subscribe(
             obj,
             [](void* o, const Event& e) {
@@ -120,7 +120,7 @@ struct EventManager {
     }
 
     template<typename Event>
-    static inline void unsubscribe(u64 listener_id) {
+    static void unsubscribe(u64 listener_id) {
         bus<Event>().unsubscribe(listener_id);
     }
 private:

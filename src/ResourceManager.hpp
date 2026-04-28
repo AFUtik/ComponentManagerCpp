@@ -130,7 +130,7 @@ struct ResourceManager {
         inline u32 get_id_nosafe() const {return id;}
     private:
         ReferencedResource(u32 id) : id(id) {
-            ResourceManager::instance().increment_reference(id);
+            ResourceManager::instance().create_reference(id);
         }
 
         inline void move_from(ReferencedResource& other) {
@@ -148,17 +148,12 @@ struct ResourceManager {
         return manager;   
     }
 
-    inline T& get(u32 id) 
-    {
-        return resources[id];
-    }
-
-    inline T& get_data(const ManagedResource& resource) 
+    inline T& get(const ManagedResource& resource) 
     {
         return resources[resource.id];
     }
 
-    inline T& get_data(const ReferencedResource& resource) 
+    inline T& get(const ReferencedResource& resource) 
     {
         return resources[resource.id];
     }
@@ -195,6 +190,10 @@ struct ResourceManager {
     inline bool expired(u32 id) {
         return references[id].counter == 0 || references[id].id != id; 
     }
+
+    inline u32 get_reference_counter(const ReferencedResource& resource) const {
+        return references[resource.id].counter;
+    }
 private:
     struct Reference {
         u32 counter = 0;
@@ -208,6 +207,11 @@ private:
     std::unordered_map<MapKey, u32> resources_map;
 
     //std::vector<ResourceFactory>    factories;
+
+    inline void create_reference(u32 id) {
+        references[id].counter++;
+        references[id].id = id;
+    }
 
     inline void increment_reference(u32 id) 
     {
@@ -252,11 +256,11 @@ public:
     }
 
     T& get() {
-        return Manager::instance().get_data(ref_);
+        return Manager::instance().get(ref_);
     }
 
     const T& get() const {
-        return Manager::instance().get_data(ref_);
+        return Manager::instance().get(ref_);
     }
 
     T* operator->() {
