@@ -103,8 +103,8 @@ struct SerialSparseSet {
     iterator begin() { return {dense.get(), 0}; }
     iterator end()   { return {dense.get(), _size}; }
 
-    const_iterator begin() const { return {dense.get(), 0}; }
-    const_iterator end()   const { return {dense.get(), _size}; }
+    const_iterator cbegin() const { return {dense.get(), 0}; }
+    const_iterator cend()   const { return {dense.get(), _size}; }
 
     explicit SerialSparseSet(I reserve = 0) : _capacity(reserve) {
         if (reserve > 0) allocate();

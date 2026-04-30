@@ -12,6 +12,7 @@
 #include <concepts>
 #include <cstdint>
 #include <vector>
+#include <bit>
 
 #include "collections/SparseSet.hpp"
 
@@ -41,9 +42,11 @@ struct ComponentManager {
 
         bool valid() { return id < invalid;}
 
-        I get_id() {return id;}
+        I get_id() const {return id;}
     private:
         I id = invalid;
+
+        friend struct ComponentManager;
     };
 
     struct ObjectView
@@ -93,12 +96,9 @@ struct ComponentManager {
 
     struct BaseComponent {    
         BaseComponent() = default;
-
-        BaseComponent(const BaseComponent&) = delete;
-        BaseComponent& operator=(const BaseComponent&) = delete;
+        ~BaseComponent() = default;
 
         BaseComponent(BaseComponent&&) noexcept = default;
-        BaseComponent& operator=(BaseComponent&&) noexcept = default;
     };
  
     template <typename C> 
@@ -124,30 +124,31 @@ struct ComponentManager {
         
     struct ComponentArray {
         static constexpr std::size_t BLOCK_SIZE = 512;
-
+    
+        struct AlignedDeleter {
+            std::size_t align = alignof(std::max_align_t);
+    
+            void operator()(void* p) const noexcept {
+                ::operator delete[](p, std::align_val_t(align));
+            }
+        };
+    
         struct Block {
             ComponentArray* parent = nullptr;
-
-            std::size_t align = alignof(std::max_align_t);
-            std::unique_ptr<std::byte[], void(*)(void*)> data{nullptr, nullptr};
-
+            std::unique_ptr<std::byte[], AlignedDeleter> data;
+    
             Block() = default;
-
-            Block(ComponentArray* parent) : 
-                parent(parent),
-                align(parent->type->align),
-                data(nullptr, [align = this->align](void* p) {
-                    ::operator delete[](p, std::align_val_t(align));
-                })
+    
+            Block(ComponentArray* parent) 
+                : parent(parent),
+                data(nullptr, AlignedDeleter{parent->type->align})
             {
                 const std::size_t data_size = BLOCK_SIZE * this->parent->type->size;
-
                 void* raw = ::operator new[](data_size, std::align_val_t(this->parent->type->align));
                 data.reset(static_cast<std::byte*>(raw));
-
                 std::memset(data.get(), 0, data_size);
             }
-
+    
             BaseComponent* operator[](std::size_t i) const {
                 assert(i < BLOCK_SIZE);
                 return reinterpret_cast<BaseComponent*>(
@@ -155,6 +156,7 @@ struct ComponentManager {
                 );
             }
         };
+
 
         ComponentType* type = nullptr;
         std::vector<Block> blocks;
@@ -184,11 +186,13 @@ struct ComponentManager {
     };
 
     struct ComponentMaskStorage {
+        static constexpr std::size_t WORDS_PER_OBJECT = (MAX_COMPONENTS + 63) / 64;
+
         ComponentMaskStorage() = default;
 
         void resize(std::size_t count) {
             objects_count = count;
-            data.resize(count * words_per_object);
+            data.resize(count * WORDS_PER_OBJECT);
         }
 
         bool has_mask(std::size_t obj_id, std::size_t comp_id) const {
@@ -211,41 +215,45 @@ struct ComponentManager {
         }
 
         void clear_masks(std::size_t obj_id) {
-            for (std::size_t w = 0; w < words_per_object; ++w) {
+            for (std::size_t w = 0; w < WORDS_PER_OBJECT; ++w) {
                 word_at(obj_id, w) = 0;
             }
         }
+        
+        uint64_t get_word(std::size_t obj_id, std::size_t word_idx)
+        { 
+            return data[obj_id * WORDS_PER_OBJECT + word_idx];
+        }
     private:
+        const uint64_t& word_at(std::size_t obj_id, std::size_t word_idx) const {
+            return data[obj_id * WORDS_PER_OBJECT + word_idx];
+        }  
+        
         uint64_t& word_at(std::size_t obj_id, std::size_t word_idx) {
-            return data[obj_id * words_per_object + word_idx];
-        }        
+            return data[obj_id * WORDS_PER_OBJECT + word_idx];
+        }      
 
         std::vector<uint64_t> data;
         std::size_t objects_count = 0;
-        const std::size_t words_per_object = (MAX_COMPONENTS + 63) / 64;
     };
 
     template<typename... Components>
     requires (std::derived_from<Components, BaseComponent> && ...)
     struct View {
-        View(T& p) : _p(p), _words_per_object((MAX_COMPONENTS + 63) / 64) {
-           _required_mask.resize(_words_per_object, 0);
-        
+        View(T* p) : _p(p) {
             (_set_required_bit(Component<Components>::_id), ...);
 
-            _arrays = std::make_tuple(
-                &_p.template get_array<Components>()...
-            );
+            _arrays = { &_p->template get_array<Components>()... };
         }
 
         struct iterator {
-            using const_set_iter = typename SerialSparseSet<Object>::ConstIteraor ;
+            using const_set_iter = typename SerialSparseSet<Object>::const_iterator;
 
             struct EndTag {};
 
-            iterator(T& p,
+            iterator(T* p,
                     const_set_iter iter,
-                    const std::vector<u64>& mask,
+                    const std::array<u64, ComponentMaskStorage::WORDS_PER_OBJECT>& mask,
                     const std::array<ComponentArray*, sizeof...(Components)> &arrays)
                 : _p(p)
                 , obj_iter(std::move(iter))
@@ -255,7 +263,7 @@ struct ComponentManager {
                 skip_invalid();
             }
 
-            iterator(T& p, const_set_iter iter, EndTag)
+            iterator(T* p, const_set_iter iter, EndTag)
                 : _p(p)
                 , obj_iter(std::move(iter))
             {}
@@ -280,28 +288,29 @@ struct ComponentManager {
             }
 
         private:
+            T* _p = nullptr;
+
             const_set_iter obj_iter;
-            T& _p;
-            const std::vector<u64>& _required_mask;
+            std::array<u64, ComponentMaskStorage::WORDS_PER_OBJECT> _required_mask;
             std::array<ComponentArray*, sizeof...(Components)> _arrays;
 
             void skip_invalid() {
-            while (obj_iter != _p.objects.end()) {
-                const I id = (*obj_iter).get_id();
-                
-                bool has_all = true;
-                for (std::size_t w = 0; w < _required_mask.size(); ++w) {
-                    u64 obj_word = _p.components_mask.get_word(id, w);
-                    if ((obj_word & _required_mask[w]) != _required_mask[w]) {
-                        has_all = false;
-                        break;
+                while (obj_iter != _p->objects.cend()) {
+                    const I id = (*obj_iter).get_id();
+                    
+                    bool has_all = true;
+                    for (std::size_t w = 0; w < ComponentMaskStorage::WORDS_PER_OBJECT; ++w) {
+                        const u64 obj_word = _p->maskStorage.get_word(id, w);
+                        if ((obj_word & _required_mask[w]) != _required_mask[w]) {
+                            has_all = false;
+                            break;
+                        }
                     }
+                    
+                    if (has_all) break;
+                    ++obj_iter;
                 }
-                
-                if (has_all) break;
-                ++obj_iter;
             }
-        }
 
             template<std::size_t... Is>
             auto get_components(I id, std::index_sequence<Is...>) const {
@@ -314,22 +323,22 @@ struct ComponentManager {
         };
 
         iterator begin() {
-            return Iterator(_p, _p.objects.begin(), _required_mask, _arrays);
+            return iterator(_p, _p->objects.cbegin(), _required_mask, _arrays);
         }
 
         iterator end() {
-            return Iterator(_p, _p.objects.end(), typename iterator::EndTag{});
+            return iterator(_p, _p->objects.cend(), typename iterator::EndTag{});
         }
 
     private:
-        T& _p;
-        std::vector<u64> _required_mask;
-        std::size_t _words_per_object;
+        T* _p = nullptr;
+
+        std::array<u64, ComponentMaskStorage::WORDS_PER_OBJECT> _required_mask = {};
         std::array<ComponentArray*, sizeof...(Components)> _arrays;
 
         void _set_required_bit(u64 comp_id) {
             std::size_t word_idx = comp_id / 64;
-            std::size_t bit_idx = comp_id % 64;
+            std::size_t bit_idx =  comp_id % 64;
             _required_mask[word_idx] |= (1ULL << bit_idx);
         }
     };
@@ -354,64 +363,82 @@ struct ComponentManager {
         const u64 id = Component<C>::_id;
         auto& array = components[id];
 
-        return maskStorage.has_mask(object.id, id); //components_mask[object.id][id];
+        return maskStorage.has_mask(object.get_id(), id);
     }
 
-    template <typename C>
-    inline C& add_component(const Object& object, C&& component) {
+    template <typename C, typename... Args>
+    inline void add_component(const Object& object, Args&&... args) {
         static_assert(std::is_base_of_v<BaseComponent, C>);
 
         const u64 id = Component<C>::_id;
+        assert(maskStorage.has_mask(object.id, id) == false && "Component already exists");
+
         auto& array = components[id];
 
         array.resize(object.id + 1);
 
         void* raw = array[object.id];
         C* ptr = std::launder(reinterpret_cast<C*>(raw));
-        new (ptr) C(std::forward<C>(component));
+        new (ptr) C(std::forward<Args>(args)...);
 
-        //components_mask[object.id].set(id);
         maskStorage.set_mask(object.id, id);
-        ptr->block = object.id / ComponentArray::BLOCK_SIZE;
-
-        return *ptr;
+        if constexpr(std::is_base_of_v<Component<C>, C>) ptr->block = object.id / ComponentArray::BLOCK_SIZE;
     }
 
     template <typename C>
     inline void remove_component(Object& object) {
+        static_assert(std::is_base_of_v<BaseComponent, C>);
+
         const u64 id = Component<C>::_id;
+        assert(maskStorage.has_mask(object, id) == true && "Object doesn't have the component");
+
         auto& type = components_types[id];
         auto& array = components[id];
 
         void* ptr = array[object.id];
         type.destroy(ptr);
 
-        //components_mask[object.id].reset(id);
         maskStorage.reset_mask(object.id, id);
     }
 
     template <typename C>
     inline C& get_component(const Object& object) const {
         const u64 id = Component<C>::_id; 
-        //assert(components_mask[object.id][id] && "Component not present");
+        assert(maskStorage.has_mask(object.id, id) && "Component not present");
         return *reinterpret_cast<C*>(components[id][object.id]);
+    }
+    
+    template <typename... Args>
+    inline const Object& create_object(Args&&... args) {
+        u64 i = objects.push(Object(objects.size(), std::forward<Args>(args)...));
+        maskStorage.resize(objects.size());
+        return objects[i];
     }
     
     inline const SerialSparseSet<Object>& get_objects() const {return objects;}
   
     inline const Object& object_at(u64 i) const {return objects[i];}
 
-    template <typename... Args>
-    inline Object& create_object(Args&&... args) {
-        u64 i = objects.push(Object(invalid, std::forward<Args>(args)...));
-
-        Object& obj = objects[i];
-
-        obj.id = i;
-        return obj;
-    }
-
     inline void remove_object(const Object& object) {
+        const std::size_t obj_id = object.id;
+        for (std::size_t w = 0; w < maskStorage.words_per_object; ++w) {
+            uint64_t word = maskStorage.get_word(obj_id, w);
+            while (word) {
+                std::size_t bit = std::countr_zero(word);
+                std::size_t comp_id = w * 64 + bit;
+
+                if (comp_id < components_cnt) {
+                    auto& type = components_types[comp_id];
+                    auto& array = components[comp_id];
+
+                    void* ptr = array[obj_id];
+                    type.destroy(ptr);
+                }
+
+                word &= (word - 1);
+            }
+        }
+        maskStorage.clear_masks(obj_id);
         objects.erase(object.id);
     }
 private:
