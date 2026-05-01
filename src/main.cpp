@@ -1,8 +1,10 @@
 #include <iostream>
 
 #include "ComponentManager.hpp"
+#include "EventSystem.hpp"
+#include <locale>
 
-struct ECS : public ComponentManager<ECS, u64, Empty, 64, 256>
+struct ECS : public ComponentManager<ECS, u64, Empty, 1024, 64, 256>
 { 
     static ECS& instance()
     { 
@@ -61,6 +63,9 @@ struct ECTag : public PlainEntityComponent<ECTag>
 
 int main(int, char**)
 {
+    setlocale(LC_ALL, "ru_RU.UTF-8");
+
+    /*
     auto& manager = ECS::instance();
     manager.register_type<ECPosition>();
     manager.register_type<ECAcceleration>();
@@ -77,7 +82,11 @@ int main(int, char**)
         std::cout << vel.velocity.x << std::endl;
     }
 
-    std::cout << sizeof(manager) << std::endl;
+    std::cout << sizeof(Entity) << std::endl;
+
+    */
+
+    testEvents();
 
     return 0;
 }

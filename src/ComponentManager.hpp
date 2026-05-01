@@ -28,9 +28,11 @@ template <
     typename T,
     typename I,
     typename ObjBase = Empty,
+    size_t MAX_OBJECTS = 0,
     size_t MAX_COMPONENTS = 64,
     size_t COMPONENTS_ALLOC = 256>
-struct ComponentManager {
+struct ComponentManager 
+{
     static constexpr I invalid = std::numeric_limits<I>::max();
     
     struct Object : public ObjBase {
@@ -48,6 +50,12 @@ struct ComponentManager {
 
         friend struct ComponentManager;
     };
+
+    using ObjSet = std::conditional_t<
+        MAX_OBJECTS == 0,
+        SparseSet<Object, I>,
+        StaticSparseSet<Object, MAX_OBJECTS, I>
+    >;
 
     struct ObjectView
     {
@@ -247,12 +255,10 @@ struct ComponentManager {
         }
 
         struct iterator {
-            using const_set_iter = typename SerialSparseSet<Object>::const_iterator;
-
             struct EndTag {};
 
             iterator(T* p,
-                    const_set_iter iter,
+                    ObjSet::const_iterator iter,
                     const std::array<u64, ComponentMaskStorage::WORDS_PER_OBJECT>& mask,
                     const std::array<ComponentArray*, sizeof...(Components)> &arrays)
                 : _p(p)
@@ -263,7 +269,7 @@ struct ComponentManager {
                 skip_invalid();
             }
 
-            iterator(T* p, const_set_iter iter, EndTag)
+            iterator(T* p, ObjSet::const_iterator iter, EndTag)
                 : _p(p)
                 , obj_iter(std::move(iter))
             {}
@@ -290,7 +296,7 @@ struct ComponentManager {
         private:
             T* _p = nullptr;
 
-            const_set_iter obj_iter;
+            ObjSet::const_iterator obj_iter;
             std::array<u64, ComponentMaskStorage::WORDS_PER_OBJECT> _required_mask;
             std::array<ComponentArray*, sizeof...(Components)> _arrays;
 
@@ -415,7 +421,7 @@ struct ComponentManager {
         return objects[i];
     }
     
-    inline const SerialSparseSet<Object>& get_objects() const {return objects;}
+    inline const ObjSet& get_objects() const {return objects;}
   
     inline const Object& object_at(u64 i) const {return objects[i];}
 
@@ -451,6 +457,6 @@ private:
     std::array<ComponentType,  MAX_COMPONENTS> components_types;
     u64 components_cnt = 0;
 
-    SerialSparseSet<Object> objects;
+    ObjSet objects;
     ComponentMaskStorage maskStorage;
 };

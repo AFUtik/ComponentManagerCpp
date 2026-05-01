@@ -1,14 +1,95 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <cassert>
 #include <memory>
 
 using u64 = std::uint64_t;
 
+template<typename T, size_t N, typename I = u64>
+struct StaticSparseSet {
+    static constexpr I INVALID = std::numeric_limits<I>::max();
+    static_assert(N < static_cast<size_t>(INVALID), "N exceeds index type range");
+
+    template<typename U>
+    I push(U&& data) {
+        assert(_size < N);
+
+        const I id = _size;
+
+        dense   [id] = std::forward<U>(data);
+
+        dense_id[id] = id;
+        sparse  [id] = id;
+
+        _size++;
+        return id;
+    }
+
+    void erase(I id) {
+        assert(contains(id));
+
+        const I di      = sparse[id];
+        const I last    = _size - 1;
+        const I last_id = dense_id[last];
+
+        dense   [di] = std::move(dense[last]);
+
+        dense_id[di] = last_id;
+        sparse[last_id] = di;
+
+        sparse[id] = INVALID;
+        _size--;
+    }
+
+    bool contains(I id) const {
+        if (static_cast<size_t>(id) >= N) return false;
+        return sparse[id] < _size;
+    }
+
+    T& operator[](I id) {
+        assert(contains(id));
+        return dense[sparse[id]];
+    }
+
+    const T& operator[](I id) const {
+        assert(contains(id));
+        return dense[sparse[id]];
+    }
+
+    I    size()     const { return _size; }
+    bool empty()    const { return _size == 0; }
+    bool full()     const { return _size == N; }
+    
+    static constexpr size_t capacity() { return N; }
+
+    auto begin() { return dense.begin(); }
+    auto end()   { return dense.begin() + _size; }
+
+    auto begin() const { return dense.cbegin(); }
+    auto end() const  { return dense.cbegin() + _size; }
+
+    auto cbegin() const { return dense.cbegin(); }
+    auto cend()   const { return dense.cbegin() + _size; }
+
+    using iterator = std::array<T, N>::iterator;
+    using const_iterator = std::array<T, N>::const_iterator;
+
+    StaticSparseSet() {
+        sparse.fill(INVALID);
+    }
+
+private:
+    std::array<T, N> dense;
+    std::array<I, N> dense_id;
+    std::array<I, N> sparse;
+    I _size = 0;
+};
+
 template<typename T, typename I = u64>
-struct SerialSparseSet {
+struct SparseSet {
     static constexpr I INVALID = std::numeric_limits<I>::max();
 
     template <typename U>
@@ -103,10 +184,13 @@ struct SerialSparseSet {
     iterator begin() { return {dense.get(), 0}; }
     iterator end()   { return {dense.get(), _size}; }
 
+    const_iterator begin() const { return {dense.get(), 0}; }
+    const_iterator end() const  { return {dense.get(), _size}; }
+
     const_iterator cbegin() const { return {dense.get(), 0}; }
     const_iterator cend()   const { return {dense.get(), _size}; }
 
-    explicit SerialSparseSet(I reserve = 0) : _capacity(reserve) {
+    explicit SparseSet(I reserve = 0) : _capacity(reserve) {
         if (reserve > 0) allocate();
     }
 
@@ -142,123 +226,4 @@ private:
     std::unique_ptr<I[]> dense_id;
     std::unique_ptr<I[]> sparse;
     I _size = 0, _capacity = 0;
-};
-
-template<
-    typename T,
-    typename I = u64
->
-struct SparseSet {
-    static constexpr u64 MAX = std::numeric_limits<I>::max();
-
-    template <typename U>
-    void push(U&& data, u64 index) {
-        while(index >= _capacity_sparse) allocate_sparse();
-        if(_size_dense >= _capacity_dense) allocate_dense();
-
-        sparse[index] = _size_dense;
-        dense[static_cast<u64>(_size_dense)] = std::forward<U>(data);
-        dense_ids[static_cast<u64>(_size_dense)] = index;
-        _size_dense++;
-    }
-
-    inline void erase(u64 id) {
-        const size_t index = sparse[id];
-        const size_t last_index = dense_ids[_size_dense - 1];
-
-        dense[index] = std::move(dense[_size_dense - 1]);
-        sparse[last_index] = index;
-
-        _size_dense--;
-    }
-
-    bool contains(u64 id) const {
-        size_t index = sparse[id];
-        return index < _size_sparse;
-    }
-
-    u64 size() const {
-        return _size_dense;   
-    }
-
-    T& operator[](u64 id) {
-        return dense[sparse[id]];
-    }
-
-    const T& operator[](u64 id) const {
-        return dense[sparse[id]];
-    }
-
-    struct Iterator {
-        Iterator(std::unique_ptr<T[]>& dense, u64 index) : dense(dense), index(index) {}
-
-        inline T& operator*() {
-            return dense[index];
-        }
-
-        inline void operator++() {++index;}
-
-        inline bool operator!=(const Iterator& other) const {return index != other.index;}
-    private:
-        std::unique_ptr<T[]>& dense;
-        u64 index = 0;
-    };
-
-    struct ConstIterator {
-        ConstIterator(const std::unique_ptr<T[]>& dense, u64 index) : dense(dense), index(index) {}
-
-        inline const T& operator*() const {
-            return dense[index];
-        }
-
-        inline void operator++() const {++index;}
-
-        inline bool operator!=(ConstIterator& other) const {return index != other.index;}
-    private:
-        std::unique_ptr<T[]>& dense;
-        mutable u64 index = 0;
-    };
-
-    auto begin() {return Iterator(dense, 0);}
-
-    auto end() {return Iterator(dense, _size_dense);}
-
-    auto begin() const {return ConstIterator(dense, 0);}
-
-    auto end() const {return ConstIterator(dense, _size_dense);}
-
-    SparseSet(u64 reserve = 0) : _capacity_dense(static_cast<I>(reserve)), _capacity_sparse(static_cast<I>(reserve)) {}
-private:
-    inline void allocate_sparse() {
-        size_t new_capacity = _capacity_sparse ? _capacity_sparse * 2 : 1;
-        auto new_sparse  = std::make_unique<T[]>(new_capacity);
-        std::memcpy(new_sparse.get(), sparse.get(), _size_sparse * sizeof(I));
-        sparse = std::move(new_sparse);
-        _capacity_sparse = new_capacity;
-    }
-
-    inline void allocate_dense() {
-        size_t new_capacity = _capacity_dense ? _capacity_dense * 2 : 1;
-        auto new_dense     = std::make_unique<T[]>(new_capacity);
-        auto new_dense_ids = std::make_unique<T[]>(new_capacity);
-
-        if constexpr (std::is_trivially_copyable_v<T>) {
-            std::memcpy(new_dense.get(), dense.get(), _size_dense * sizeof(T));
-        } else {
-            std::move(dense.get(), dense.get() + _size_dense, new_dense.get());
-        }
-        std::memcpy(new_dense_ids.get(), dense_ids.get(), _size_dense * sizeof(I));
-
-        dense     = std::move(new_dense);
-        dense_ids = std::move(new_dense_ids);
-        _capacity_dense = new_capacity;
-    }
-
-    std::unique_ptr<T[]> dense;
-    std::unique_ptr<I[]> dense_ids; 
-    std::unique_ptr<I[]> sparse;
-    I _size_dense  = 0;
-    I _size_sparse = 0;
-    I _capacity_dense  = 0;
-    I _capacity_sparse = 0;
 };
