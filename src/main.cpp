@@ -1,8 +1,8 @@
 #include <iostream>
+#include <limits>
 
 #include "ComponentManager.hpp"
-#include "EventSystem.hpp"
-#include <locale>
+#include "QuadTree.hpp"
 
 struct ECS : public ComponentManager<ECS, u64, Empty, 1024, 64, 256>
 { 
@@ -61,32 +61,23 @@ struct ECTag : public PlainEntityComponent<ECTag>
     }
 };
 
+using QuadTree = QuadTree_Static<
+    u32, f64,
+    Vec2, 
+    u16, u16, 
+    1<<4, 1<<8, 16, 8
+>;
+
 int main(int, char**)
 {
-    setlocale(LC_ALL, "ru_RU.UTF-8");
+    const f64 f64_min = std::numeric_limits<f64>::min();
+    const f64 f64_max = std::numeric_limits<f64>::max();
 
-    /*
-    auto& manager = ECS::instance();
-    manager.register_type<ECPosition>();
-    manager.register_type<ECAcceleration>();
-    manager.register_type<ECVelocity>();
-    manager.register_type<ECTag>();
+    QuadTree tree(
+        QuadTree::AABB{f64_min, f64_min, f64_max, f64_max}
+    );
 
-    Entity ent = manager.create_object();
-    manager.template add_component<ECTag>(ent, "Some tag");
-    manager.template add_component<ECVelocity>(ent, ECVelocity{ Vec2(50.0, 50.0) });
-
-    ECS::View<ECTag, ECVelocity> view = ECS::View<ECTag, ECVelocity>(&manager);
-    for(auto [tag, vel] : view)
-    {
-        std::cout << vel.velocity.x << std::endl;
-    }
-
-    std::cout << sizeof(Entity) << std::endl;
-
-    */
-
-    testEvents();
+    std::cout << sizeof(QuadTree::Node) << std::endl;
 
     return 0;
 }
