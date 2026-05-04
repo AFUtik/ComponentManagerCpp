@@ -21,38 +21,17 @@ concept HasXY = requires(T v) {
     { v.y } -> std::convertible_to<Float>;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  QuadTree — hot/cold node split
-//
-//  Проблема предыдущей версии:
-//    Node хранил и children_id, и items_id[CAPACITY] вместе.
-//    При большом CAPACITY или Int_Node=u64 Node > 64 байт → 2+ cache-line.
-//
-//  Решение:
-//    NodeCore  — «горячая» часть, всегда ≤ 64 байт.
-//                bounds + children_id + смещение/счётчик в item_pool_.
-//    item_pool_ — отдельный flat-вектор Int_Item;
-//                 items одного листа лежат ПОДРЯД → один prefetch накрывает всё.
-//
-//  Компромисс:
-//    Вставка в лист: append в конец item_pool_ (amortized O(1)).
-//    Split: items текущего листа уже contiguous — читаем их пачкой,
-//           перераспределяем по детям, освобождаем слот (swap-with-end в пуле).
-//    Удаление: O(itemCount) поиск + swap-with-end в пуле.
-// ─────────────────────────────────────────────────────────────────────────────
 template<
     typename T        = std::uint64_t,
     typename Float    = float,
     typename Vec2     = Vec2Base<Float>,
-    typename Int_Node = std::uint32_t,   // индекс узла
-    typename Int_Item = std::uint32_t,   // индекс в item_pool_
+    typename Int_Node = std::uint32_t,
+    typename Int_Item = std::uint32_t,
     u64 MAX_DEPTH     = 16,
-    u64 CAPACITY      = 8               // макс. items на лист до split
+    u64 CAPACITY      = 8    
 >
 requires HasXY<Vec2, Float>
 struct QuadTree {
-
-    // ── AABB ─────────────────────────────────────────────────────────────────
     struct AABB {
         Float minX, minY, maxX, maxY;
 
@@ -81,10 +60,10 @@ struct QuadTree {
     };
 
     struct NodeCore {
-        AABB     bounds {};
+        AABB bounds {};
         std::array<Int_Node, 4> children_id {};
-        Int_Item pool_offset { NULL_ITEM }; 
-        u8       item_count  { 0 };
+        u32 pool_offset { NULL_OFFSET };
+        u8  item_count  { 0 };
 
         NodeCore() noexcept { children_id.fill(NULL_NODE); }
 
@@ -95,6 +74,7 @@ struct QuadTree {
 
     static constexpr Int_Node NULL_NODE = std::numeric_limits<Int_Node>::max();
     static constexpr Int_Item NULL_ITEM = std::numeric_limits<Int_Item>::max();
+    static constexpr Int_Item NULL_OFFSET = std::numeric_limits<u32>::max();
 
     explicit QuadTree(AABB bounds) noexcept { clear(bounds); }
 
@@ -116,6 +96,7 @@ struct QuadTree {
         return insertInto(root_, pos, std::move(data), 0);
     }
 
+    /*
     template<typename Callback>
     void query(const AABB& range, Callback&& cb) const noexcept {
         queryNode(root_, range, std::forward<Callback>(cb));
@@ -132,6 +113,7 @@ struct QuadTree {
     bool remove(Pred&& pred) noexcept {
         return removeFrom(root_, std::forward<Pred>(pred));
     }
+    */
 
     [[nodiscard]] std::size_t nodeCount() const noexcept { return nodes_.size(); }
     [[nodiscard]] std::size_t itemCount() const noexcept { return items_.size(); }
@@ -150,6 +132,13 @@ protected:
         return static_cast<Int_Node>(nodes_.size() - 1);
     }
 
+    u32 allocItemBlock() noexcept
+    {
+        u32 offset = item_pool_.size();
+        item_pool_.resize(offset+CAPACITY, NULL_ITEM);
+        return offset;
+    }
+    
     Int_Item allocItem(Vec2 pos, T&& data) noexcept {
         items_.push_back({ pos, std::move(data) });
         return static_cast<Int_Item>(items_.size() - 1);
@@ -157,10 +146,9 @@ protected:
 
     void pushItemToLeaf(Int_Node ni, Int_Item item_id) noexcept {
         NodeCore& n = nodes_[ni];
-        if (n.pool_offset == NULL_ITEM) {
-            n.pool_offset = static_cast<Int_Item>(item_pool_.size());
-        }
-        item_pool_.push_back(item_id);
+        if (n.pool_offset == std::numeric_limits<u32>::max()) n.pool_offset = allocItemBlock();
+
+        item_pool_[n.pool_offset+static_cast<u32>(n.item_count)] = item_id;
         ++n.item_count;
     }
 
@@ -199,7 +187,7 @@ protected:
 
             nodes_[ni].children_id = { c0, c1, c2, c3 };
 
-            nodes_[ni].pool_offset = NULL_ITEM;
+            nodes_[ni].pool_offset = NULL_OFFSET;
             nodes_[ni].item_count  = 0;
 
             for (u8 i = 0; i < oldCount; ++i) {
@@ -208,17 +196,14 @@ protected:
                 int q         = quadrantOf(nodes_[ni].bounds, p);
                 pushItemToLeaf(nodes_[ni].children_id[q], iid);
             }
-
-            if (oldOffset + oldCount == static_cast<Int_Item>(item_pool_.size()))
-            {
-                item_pool_.resize(oldOffset);
-            }
         }
 
         int      q     = quadrantOf(nodes_[ni].bounds, pos);
         Int_Node child = nodes_[ni].children_id[q];
         return insertInto(child, pos, std::move(data), depth + 1);
     }
+
+    /* TO DO
 
     template<typename Callback>
     void queryNode(Int_Node ni, const AABB& range, Callback&& cb) const noexcept {
@@ -280,4 +265,5 @@ protected:
                 return true;
         return false;
     }
+    */
 };
